@@ -121,6 +121,19 @@ $("connect").onclick = () =>
     render(await provider.request({ method: "eth_chainId" }));
   });
 
+// Reabre el selector de cuentas de MetaMask. MetaMask solo expone a un sitio las cuentas
+// que el usuario ha conectado a él: si cambias a una cuenta no conectada, el sitio no se entera
+// y sigue firmando con la anterior.
+$("choose").onclick = () =>
+  timed("Elegir cuentas", async () => {
+    if (!provider) throw new Error("MetaMask no disponible");
+    await provider.request({ method: "wallet_requestPermissions", params: [{ eth_accounts: {} }] });
+    const accounts = await provider.request({ method: "eth_accounts" });
+    account = accounts[0] ? getAddress(accounts[0]) : undefined;
+    log(`cuentas conectadas a este sitio: ${accounts.map((a) => getAddress(a)).join(", ")}`);
+    render();
+  });
+
 $("disconnect").onclick = () =>
   timed("Desconectar", async () => {
     if (!provider) return;
@@ -233,12 +246,30 @@ $("read").onclick = () =>
     }
   });
 
+async function roleOf(address: Address): Promise<string> {
+  const pc = publicClient();
+  const contract = contractAddress();
+  const [parent, isChild] = await Promise.all([
+    pc.readContract({ address: contract, abi: familyLedgerAbi, functionName: "parent" }),
+    pc.readContract({ address: contract, abi: familyLedgerAbi, functionName: "isChild", args: [address] }),
+  ]);
+  if (parent.toLowerCase() === address.toLowerCase()) return "padre";
+  return isChild ? "hijo" : "ninguno";
+}
+
 // simulateContract ejecuta la llamada en seco: si el contrato va a revertir (p. ej. NotParent
 // o TaskAlreadyRewarded) lo sabemos ANTES de pedir la firma y sin gastar gas.
 async function write(
   functionName: "addChild" | "reward" | "spend",
   args: readonly unknown[],
 ) {
+  // Relee la cuenta activa justo antes de firmar, por si el evento accountsChanged no llegó.
+  const [current] = await provider!.request({ method: "eth_accounts" });
+  if (!current) throw new Error("No hay ninguna cuenta conectada");
+  account = getAddress(current);
+  render();
+  log(`${functionName} se firmará con ${account} (rol en el contrato: ${await roleOf(account)})`);
+
   const { request } = await publicClient().simulateContract({
     account: account!,
     address: contractAddress(),
