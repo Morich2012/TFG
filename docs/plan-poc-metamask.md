@@ -280,6 +280,11 @@ Luego, en la dApp:
 
 ---
 
+### Hallazgos durante la ejecución real (1 de octubre)
+
+- **Cambio de cuenta:** MetaMask solo expone a un sitio las cuentas conectadas a él. Si el usuario cambia a una cuenta no conectada, la dApp no recibe `accountsChanged` y sigue firmando con la anterior. Se vio porque el "Extraño" obtuvo `TaskAlreadyRewarded` (firmaba como Padre) y el "Hijo" `NotChild`. Se corrigió con el botón *Elegir cuentas* (`wallet_requestPermissions`), releyendo `eth_accounts` antes de cada escritura y mostrando el rol de la cuenta que va a firmar. Es un dato de UX relevante: con varias personas en un mismo navegador la cuenta activa no es evidente.
+- **La cuenta del padre es una smart account (EIP-7702):** en Etherscan la cuenta aparece como *Authority* delegada, y las llamadas al contrato salen como *Redeem Delegation*. MetaMask ha actualizado la cuenta a MetaMask Smart Account. Las llamadas al contrato llegan como transacciones internas, por eso la página del contrato en Etherscan no las lista en la pestaña principal. La firma `personal_sign` sigue siendo ECDSA de la clave original, así que la verificación del backend sigue siendo válida. Esto conviene comentarlo en la memoria.
+
 ## 12. Qué conclusiones debemos extraer de la PoC
 
 ### 12.1 Criterios de decisión (acuérdalos con el tutor antes de ejecutar la PoC, así la decisión no es subjetiva)
