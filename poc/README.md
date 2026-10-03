@@ -7,8 +7,12 @@ está en [`docs/plan-poc-metamask.md`](../docs/plan-poc-metamask.md).
 poc/
 ├── contracts/   Hardhat 3 + Solidity: FamilyLedger.sol, tests y despliegue
 ├── backend/     Spring Boot 4.1 + Web3j: login con firma de MetaMask
-└── dapp/        Vite + TypeScript + viem: página con los niveles 1, 2 y 3
+├── dapp/        Vite + TypeScript + viem: página con los niveles 1, 2 y 3
+└── device-key/  PoC 2: firmador Java P-256 (lo que hará la app Android con la huella)
 ```
+
+La PoC 2 (sin MetaMask para el niño) está explicada en
+[`docs/alternativas-sin-metamask.md`](../docs/alternativas-sin-metamask.md).
 
 ## Requisitos
 
@@ -21,7 +25,7 @@ poc/
 ```bash
 cd poc/contracts
 npm install
-npx hardhat test                      # 7 tests en la red simulada
+npx hardhat test                      # 16 tests (FamilyLedger + DeviceKeyLedger)
 npx hardhat test nodejs --gas-stats   # gas por función
 ```
 
@@ -66,3 +70,12 @@ Orden de prueba:
 
 Cada operación queda en el registro de la página con su tiempo, su hash y el enlace a Etherscan:
 cópialo como evidencia para la checklist del plan.
+
+## 4. PoC 2: firma con la clave del móvil (`device-key/`)
+
+```bash
+cd poc/device-key
+mvn test                # firma P-256 con s baja y codificación igual a abi.encode
+# Regenera la firma Java que usa el test de interoperabilidad del contrato:
+mvn -q compile exec:java -Dexec.args="../contracts/test/fixtures/java-device-signature.json"
+```
