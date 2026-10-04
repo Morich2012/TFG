@@ -1,0 +1,13 @@
+{
+  "generatedBy": "poc/device-key (Java 21.0.10, SHA256withECDSA, secp256r1)",
+  "chainId": 31337,
+  "contract": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+  "childId": "0x835ad22437ee946e4610695f67fa2f0bc2b53990c257d263c5b71f5e2bd0dd71",
+  "conceptId": "0xa977e82eb0eaf82278c069b0237689d4e2eccfc1b39e26151f430bef71c6dde6",
+  "amount": "4",
+  "nonce": "0",
+  "x": "0x6555592fec658f905af03c6ebd2bd9071f108338906b3d5ff48c7488e21bb683",
+  "y": "0x4466a85324ccdf51178a613eb2a0d8520a3d5abef106ced458c295c172648273",
+  "r": "0x83a269867f621bc2292b115a99a110d1203fedf4dc92c651d0f43e7e4019f486",
+  "s": "0x2093980a777d0d2134594a87d40ec289d20a4129429cd27960cedb1d26904daa"
+}
