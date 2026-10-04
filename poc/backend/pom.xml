@@ -24,10 +24,10 @@
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-webmvc</artifactId>
     </dependency>
-    <!-- Solo el módulo criptográfico de Web3j: recuperar la dirección que firmó -->
+    <!-- Web3j: verificar firmas de MetaMask (nivel 2) y, en la PoC 2, enviar transacciones como relayer -->
     <dependency>
       <groupId>org.web3j</groupId>
-      <artifactId>crypto</artifactId>
+      <artifactId>core</artifactId>
       <version>6.0.0</version>
     </dependency>
     <dependency>
