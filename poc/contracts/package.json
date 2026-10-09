@@ -5,7 +5,7 @@
     "test": "hardhat test",
     "gas": "hardhat test nodejs --gas-stats",
     "deploy:sepolia": "hardhat ignition deploy ignition/modules/FamilyLedger.ts --network sepolia",
-    "export:dapp": "hardhat compile --build-profile production && node scripts/export-artifact.mjs"
+    "export:artifacts": "hardhat compile --build-profile production && node scripts/export-artifact.mjs"
   },
   "license": "ISC",
   "type": "module",

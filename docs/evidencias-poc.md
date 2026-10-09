@@ -38,3 +38,24 @@ Ejecución real del 1 de octubre de 2026 con MetaMask (extensión de navegador),
 
 1. **Cambio de cuenta silencioso.** Con solo el Padre conectado al sitio, cambiar a Hijo o Extraño en MetaMask no avisaba a la dApp, que seguía firmando como Padre. Se corrigió con el botón *Elegir cuentas* y mostrando el rol de quien firma (commit `d72234f`).
 2. **Las cuentas son smart accounts EIP-7702.** Las llamadas al contrato pasan por el `DelegationManager` de MetaMask (`redeemDelegations`), con unos 90.000-100.000 de gas extra por operación respecto a una cuenta normal. Detalle en [explicacion-poc.md](explicacion-poc.md#52-gas-local-vs-sepolia-real).
+
+## PoC 2: gasto con la huella desde Android (6 de octubre de 2026)
+
+App `poc/android-child` en el emulador de Android Studio, backend `poc/backend` como relayer y contrato `DeviceKeyLedger` desplegado por el relayer.
+
+| Rol | Dirección |
+|---|---|
+| Relayer (paga el gas; en la PoC también hace de padre) | [`0x302D832f091f8f50afc18574ce308288374bbfe3`](https://sepolia.etherscan.io/address/0x302D832f091f8f50afc18574ce308288374bbfe3) |
+| Contrato `DeviceKeyLedger` | [`0xee11157fc4717b776c7bd0c15587e1877ca4178d`](https://sepolia.etherscan.io/address/0xee11157fc4717b776c7bd0c15587e1877ca4178d) |
+
+| # | Prueba | Resultado | Evidencia |
+|---|---|---|---|
+| H1 | Despliegue del contrato por el relayer | ✅ 582.059 gas | [0x03d61b49…](https://sepolia.etherscan.io/tx/0x03d61b49eae9b90ecb2ffdfec663dd25ae191c2ea6d5fc8c2c5930ed51edf6e3) |
+| H2 | Clave P-256 en el Android Keystore con huella obligatoria | ✅ creada en 1.083 ms (en *software*: el emulador no tiene chip seguro) | registro de la app |
+| H3 | Registrar el móvil (`registerDevice`) | ✅ bloque 11855627, 69.171 gas, 12,0 s | [0x4bce6f40…](https://sepolia.etherscan.io/tx/0x4bce6f40268001d82b0ad06d1fc4a6ee2d7cfa2581a7b4df03885e5490a32fc2) |
+| H4 | Recompensa +10 (`reward`) | ✅ bloque 11855630, 73.520 gas, 18,5 s | [0x9893ff23…](https://sepolia.etherscan.io/tx/0x9893ff2322d18ce86114b749a11a5c09e8272b94a8f1dfe0cebaa9972f878083) |
+| H5 | **Gastar 3 en cromos poniendo el dedo** (`spendSigned`) | ✅ "¡Hecho!" en **400 ms**; confirmado en bloque 11855632 a los **6,6 s**; **66.395 gas** | [0x1f67f35c…](https://sepolia.etherscan.io/tx/0x1f67f35c73eb833ea4e3a9049323b06521204eba2ac1e1a3ca3d85630326d26d) |
+| H6 | Recompensa antes de registrar el móvil | ✅ rechazada con `UnknownChild` sin gastar gas | registro de la app |
+| H7 | Huella real en un móvil con TEE/StrongBox | ⏳ pendiente | |
+
+Comparado con el mismo gasto con MetaMask (N3.3c): **66.395 frente a 133.534 de gas**, el niño no ve ninguna ventana técnica ni necesita ETH, y la app responde en 0,4 s en lugar de 22 s.
