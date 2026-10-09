@@ -62,7 +62,7 @@ Por qué es la mejor para tu TFG:
 
 **Gas medido** (red simulada): un gasto firmado con la clave del móvil cuesta **~68.650**, frente a los **133.534** del mismo gasto con MetaMask en Sepolia (por la smart account EIP-7702). Registrar el móvil cuesta ~69.900 (una vez) y el despliegue ~927.000.
 
-**Lo que falta por validar:** la app Android real (generar la clave en el Keystore con huella y firmar) y el relayer en Spring Boot enviando a Sepolia. Es el siguiente paso si eliges esta vía.
+**Actualización (4 de octubre):** ya están hechos la app Android ([`poc/android-child`](../poc/android-child/README.md)) y el relayer en Spring Boot. Probados juntos en una red local: registrar el móvil 69.195 de gas, recompensar 73.520 y gastar 66.395, con respuesta a la app en 39 ms. Falta la prueba con la huella real en un móvil y en Sepolia.
 
 ## Límites que hay que reconocer en la memoria
 
