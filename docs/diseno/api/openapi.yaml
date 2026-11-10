@@ -1,0 +1,2245 @@
+openapi: 3.1.0
+info:
+  title: API de la economía familiar (TFG)
+  version: 0.1.0
+  summary: Contrato REST del backend Spring Boot para la app Android de educación financiera en familia.
+  description: |
+    Borrador de diseño (T4). Cubre el núcleo y los módulos del MVP: familia y acceso,
+    cuentas y movimientos, tareas, tienda y dinero real, huchas e interés, paga,
+    presupuesto, progreso y logros, estadísticas y cuestionario de conocimientos.
+
+    **Reglas comunes**
+
+    * Todas las rutas cuelgan de `/api/v1` y usan JSON.
+    * Salvo las de `/auth`, todas exigen `Authorization: Bearer <JWT>`. El token lleva el
+      miembro, su familia y su rol (`ADULTO_ADMIN`, `ADULTO` o `HIJO`). Cada consulta se
+      filtra por la familia del token (RNF-03): un id de otra familia responde 404, no 403,
+      para no revelar que existe.
+    * Las cantidades son enteros de monedas (RNF-07). Los euros van en céntimos.
+    * Las operaciones que mueven dinero aceptan la cabecera `Idempotency-Key`. Si el móvil
+      repite la petición con la misma clave, el servidor devuelve el resultado original y
+      no cobra dos veces.
+    * Los errores siguen RFC 9457 (`application/problem+json`) con un campo `codigo`
+      estable que la app traduce a un mensaje para niños.
+    * La etiqueta `x-roles` de cada operación indica quién puede llamarla. Un hijo solo ve
+      sus propios datos y lo que la familia comparte (RNF-02).
+    * Si la operación depende de una mecánica (`x-mecanica`) y el hijo aún no la tiene
+      desbloqueada, responde 403 con `codigo: MECANICA_BLOQUEADA`.
+servers:
+  - url: http://localhost:8080/api/v1
+    description: Desarrollo local (Docker Compose)
+tags:
+  - name: Acceso
+    description: Registro, inicio de sesión y vinculación de dispositivos
+  - name: Familia
+    description: Miembros, códigos y resumen para los adultos
+  - name: Progreso
+    description: Experiencia, niveles, etapas, mecánicas y logros
+  - name: Cuentas
+    description: Monedero, historial, transferencias y correcciones del libro
+  - name: Huchas
+    description: Ahorro con meta y huchas bloqueadas
+  - name: Reglas
+    description: Paga, interés e inflación
+  - name: Tareas
+    description: Tareas, asignaciones y aprobación
+  - name: Tienda
+    description: Recompensas, compras y dinero real
+  - name: Presupuesto
+    description: Presupuesto semanal por categorías
+  - name: Estadísticas
+    description: Datos para las gráficas
+  - name: Cuestionarios
+    description: Cuestionario de conocimientos inicial y final
+security:
+  - bearerAuth: []
+
+paths:
+  # ---------------------------------------------------------------- Acceso
+  /auth/registro:
+    post:
+      tags: [Acceso]
+      operationId: registrarAdulto
+      summary: Registra un adulto y crea su familia (RF-01)
+      description: Crea la familia, su cuenta BANCO y al adulto como `ADULTO_ADMIN`.
+      security: []
+      x-roles: [PUBLICO]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegistroPeticion' }
+      responses:
+        '201':
+          description: Familia creada y sesión iniciada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Sesion' }
+        '400': { $ref: '#/components/responses/Invalida' }
+        '409':
+          description: 'El correo ya está registrado (`codigo: CORREO_EN_USO`)'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problema' }
+
+  /auth/login:
+    post:
+      tags: [Acceso]
+      operationId: iniciarSesion
+      summary: Inicio de sesión de un adulto
+      security: []
+      x-roles: [PUBLICO]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginPeticion' }
+      responses:
+        '200':
+          description: Sesión iniciada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Sesion' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /auth/vincular:
+    post:
+      tags: [Acceso]
+      operationId: vincularDispositivo
+      summary: El dispositivo del hijo canjea el código QR por una sesión (RF-04)
+      description: |
+        El código es de un solo uso y caduca a los 10 minutos. El hijo no necesita correo
+        ni contraseña. La app guarda el token de refresco cifrado con una clave del Android
+        Keystore que se desbloquea con la huella o con el PIN.
+      security: []
+      x-roles: [PUBLICO]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VincularPeticion' }
+      responses:
+        '201':
+          description: Dispositivo vinculado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Sesion' }
+        '400': { $ref: '#/components/responses/Invalida' }
+        '410':
+          description: 'Código caducado o ya usado (`codigo: CODIGO_CADUCADO`)'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problema' }
+
+  /auth/unirse:
+    post:
+      tags: [Acceso]
+      operationId: unirseAFamilia
+      summary: Un segundo adulto se une con un código de invitación (RF-02)
+      security: []
+      x-roles: [PUBLICO]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UnirsePeticion' }
+      responses:
+        '201':
+          description: Adulto añadido a la familia como `ADULTO`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Sesion' }
+        '409':
+          description: Correo en uso
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problema' }
+        '410':
+          description: Código caducado o ya usado
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problema' }
+
+  /auth/refrescar:
+    post:
+      tags: [Acceso]
+      operationId: refrescarSesion
+      summary: Obtiene un token de acceso nuevo con el token de refresco
+      description: |
+        El token de acceso dura 15 minutos y el de refresco se rota en cada uso. Si el hijo
+        entra con PIN en lugar de huella, la app envía el PIN y el servidor lo comprueba
+        (con límite de intentos).
+      security: []
+      x-roles: [PUBLICO]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefrescarPeticion' }
+      responses:
+        '200':
+          description: Tokens nuevos
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Sesion' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+        '429':
+          description: 'Demasiados intentos de PIN (`codigo: DEMASIADOS_INTENTOS`)'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problema' }
+
+  /auth/cerrar-sesion:
+    post:
+      tags: [Acceso]
+      operationId: cerrarSesion
+      summary: Revoca el token de refresco del dispositivo actual
+      x-roles: [ADULTO_ADMIN, ADULTO, HIJO]
+      responses:
+        '204': { description: Sesión cerrada }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /dispositivos/actual/token-push:
+    put:
+      tags: [Acceso]
+      operationId: guardarTokenPush
+      summary: Guarda el token de Firebase Cloud Messaging del dispositivo (RF-28)
+      x-roles: [ADULTO_ADMIN, ADULTO, HIJO]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tokenPush]
+              properties:
+                tokenPush: { type: string, maxLength: 255 }
+      responses:
+        '204': { description: Guardado }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  # ---------------------------------------------------------------- Familia
+  /familia:
+    get:
+      tags: [Familia]
+      operationId: obtenerFamilia
+      summary: Datos de la familia del token
+      x-roles: [ADULTO_ADMIN, ADULTO, HIJO]
+      responses:
+        '200':
+          description: Familia
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Familia' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+    patch:
+      tags: [Familia]
+      operationId: editarFamilia
+      summary: Cambia el nombre, la moneda o el tipo de cambio (RF-35)
+      description: Cambiar `monedasPorEuro` no altera los saldos; solo afecta a canjes y precios futuros.
+      x-roles: [ADULTO_ADMIN, ADULTO]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FamiliaCambios' }
+      responses:
+        '200':
+          description: Familia actualizada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Familia' }
+        '400': { $ref: '#/components/responses/Invalida' }
+        '403': { $ref: '#/components/responses/Prohibido' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /familia/miembros:
+    get:
+      tags: [Familia]
+      operationId: listarMiembros
+      summary: Miembros de la familia (nombre, avatar, rol, nivel y etapa)
+      x-roles: [ADULTO_ADMIN, ADULTO, HIJO]
+      responses:
+        '200':
+          description: Miembros
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Miembro' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+    post:
+      tags: [Familia]
+      operationId: altaHijo
+      summary: Da de alta a un hijo sin correo (RF-03)
+      description: |
+        Crea el miembro, su monedero y registra el consentimiento del adulto (RNF-06).
+        Del menor solo se guarda nombre o apodo, avatar y año de nacimiento (RNF-05).
+      x-roles: [ADULTO_ADMIN, ADULTO]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AltaHijoPeticion' }
+      responses:
+        '201':
+          description: Hijo creado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Miembro' }
+        '400': { $ref: '#/components/responses/Invalida' }
+        '403': { $ref: '#/components/responses/Prohibido' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /familia/miembros/{miembroId}:
+    parameters:
+      - $ref: '#/components/parameters/MiembroId'
+    patch:
+      tags: [Familia]
+      operationId: editarMiembro
+      summary: Edita nombre, avatar, año de nacimiento o PIN de un miembro (RF-05)
+      x-roles: [ADULTO_ADMIN, ADULTO]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MiembroCambios' }
+      responses:
+        '200':
+          description: Miembro actualizado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Miembro' }
+        '403': { $ref: '#/components/responses/Prohibido' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+    delete:
+      tags: [Familia]
+      operationId: bajaMiembro
+      summary: Da de baja a un miembro y borra sus datos personales (RF-05, RNF-06)
+      description: |
+        Revoca sus dispositivos y anonimiza el miembro. Los movimientos se conservan con el
+        autor anonimizado, porque el libro es de solo inserción. No se puede dar de baja al
+        administrador.
+      x-roles: [ADULTO_ADMIN]
+      responses:
+        '204': { description: Miembro dado de baja }
+        '403': { $ref: '#/components/responses/Prohibido' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /familia/miembros/{miembroId}/codigo-vinculacion:
+    parameters:
+      - $ref: '#/components/parameters/MiembroId'
+    post:
+      tags: [Familia]
+      operationId: generarCodigoVinculacion
+      summary: Genera el código QR para vincular el dispositivo de un hijo (RF-04)
+      x-roles: [ADULTO_ADMIN, ADULTO]
+      responses:
+        '201':
+          description: Código generado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CodigoAcceso' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /familia/miembros/{miembroId}/dispositivos:
+    parameters:
+      - $ref: '#/components/parameters/MiembroId'
+    get:
+      tags: [Familia]
+      operationId: listarDispositivos
+      summary: Dispositivos vinculados de un miembro
+      x-roles: [ADULTO_ADMIN, ADULTO]
+      responses:
+        '200':
+          description: Dispositivos
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Dispositivo' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /dispositivos/{dispositivoId}:
+    parameters:
+      - name: dispositivoId
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/Id' }
+    delete:
+      tags: [Familia]
+      operationId: revocarDispositivo
+      summary: Desvincula un dispositivo (por ejemplo, un móvil perdido)
+      x-roles: [ADULTO_ADMIN, ADULTO]
+      responses:
+        '204': { description: Dispositivo revocado }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /familia/invitaciones:
+    post:
+      tags: [Familia]
+      operationId: invitarAdulto
+      summary: Genera un código para invitar a un segundo adulto (RF-02)
+      x-roles: [ADULTO_ADMIN]
+      responses:
+        '201':
+          description: Código generado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CodigoAcceso' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /familia/resumen:
+    get:
+      tags: [Familia]
+      operationId: resumenFamilia
+      summary: Resumen de cada hijo para la pantalla de inicio del adulto (RF-27)
+      x-roles: [ADULTO_ADMIN, ADULTO]
+      responses:
+        '200':
+          description: Resumen
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ResumenFamilia' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  # ---------------------------------------------------------------- Progreso
+  /miembros/{miembroId}/progreso:
+    parameters:
+      - $ref: '#/components/parameters/MiembroId'
+    get:
+      tags: [Progreso]
+      operationId: obtenerProgreso
+      summary: Nivel, experiencia, etapa y logros de un miembro (RF-22, RF-23)
+      x-roles: [ADULTO_ADMIN, ADULTO, HIJO]
+      responses:
+        '200':
+          description: Progreso
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Progreso' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /miembros/{miembroId}/experiencia:
+    parameters:
+      - $ref: '#/components/parameters/MiembroId'
+    get:
+      tags: [Progreso]
+      operationId: historialExperiencia
+      summary: De dónde sale cada punto de experiencia
+      x-roles: [ADULTO_ADMIN, ADULTO, HIJO]
+      parameters:
+        - $ref: '#/components/parameters/Pagina'
+        - $ref: '#/components/parameters/Tamano'
+      responses:
+        '200':
+          description: Eventos de experiencia
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginaEventosExperiencia' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /miembros/{miembroId}/mecanicas:
+    parameters:
+      - $ref: '#/components/parameters/MiembroId'
+    get:
+      tags: [Progreso]
+      operationId: listarMecanicas
+      summary: Mecánicas con su estado para un miembro (RF-25, RF-34)
+      description: |
+        La app construye sus menús con esta lista. Las bloqueadas se muestran con candado y
+        el texto de `desbloqueo` («se desbloquea en el nivel 5»).
+      x-roles: [ADULTO_ADMIN, ADULTO, HIJO]
+      responses:
+        '200':
+          description: Mecánicas
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/MecanicaMiembro' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /miembros/{miembroId}/mecanicas/{codigo}:
+    parameters:
+      - $ref: '#/components/parameters/MiembroId'
+      - name: codigo
+        in: path
+        required: true
+        schema: { type: string, examples: [INTERES_SIMPLE] }
+    put:
+      tags: [Progreso]
+      operationId: ajustarMecanica
+      summary: Los padres adelantan o desactivan una mecánica para un hijo (RF-34)
+      x-roles: [ADULTO_ADMIN, ADULTO]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ajuste]
+              properties:
+                ajuste:
+                  type: string
+                  enum: [ACTIVADA, DESACTIVADA, AUTOMATICA]
+                  description: AUTOMATICA quita el ajuste y vuelve a decidir la etapa y el nivel.
+      responses:
+        '200':
+          description: Estado resultante
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MecanicaMiembro' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /miembros/{miembroId}/etapa:
+    parameters:
+      - $ref: '#/components/parameters/MiembroId'
+    put:
+      tags: [Progreso]
+      operationId: fijarEtapa
+      summary: Fija la etapa de un hijo a mano o la devuelve a automática (RF-34)
+      x-roles: [ADULTO_ADMIN, ADULTO]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [etapaFijada]
+              properties:
+                etapaFijada:
+                  type: [integer, 'null']
+                  minimum: 1
+                  maximum: 5
+                  description: null = automática por edad y nivel.
+      responses:
+        '200':
+          description: Progreso actualizado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Progreso' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /familia/hitos:
+    get:
+      tags: [Progreso]
+      operationId: hitosFamilia
+      summary: Qué logros tiene cada miembro y quién falta (RF-43)
+      description: Sin ranking de puntos; solo quién ha conseguido cada logro.
+      x-roles: [ADULTO_ADMIN, ADULTO, HIJO]
+      responses:
+        '200':
+          description: Hitos
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/HitoFamiliar' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  # ---------------------------------------------------------------- Cuentas
+  /cuentas:
+    get:
+      tags: [Cuentas]
+      operationId: listarCuentas
+      summary: Cuentas visibles con su saldo (RF-09)
+      description: Un hijo ve su monedero y sus huchas; un adulto ve las de todos los hijos.
+      x-roles: [ADULTO_ADMIN, ADULTO, HIJO]
+      parameters:
+        - name: titularId
+          in: query
+          schema: { $ref: '#/components/schemas/Id' }
+        - name: tipo
+          in: query
+          schema: { $ref: '#/components/schemas/TipoCuenta' }
+      responses:
+        '200':
+          description: Cuentas
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Cuenta' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /cuentas/{cuentaId}:
+    parameters:
+      - $ref: '#/components/parameters/CuentaId'
+    get:
+      tags: [Cuentas]
+      operationId: obtenerCuenta
+      summary: Una cuenta con su saldo
+      x-roles: [ADULTO_ADMIN, ADULTO, HIJO]
+      responses:
+        '200':
+          description: Cuenta
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cuenta' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /cuentas/{cuentaId}/movimientos:
+    parameters:
+      - $ref: '#/components/parameters/CuentaId'
+    get:
+      tags: [Cuentas]
+      operationId: listarMovimientos
+      summary: Historial de una cuenta, del más reciente al más antiguo (RF-10, RF-16)
+      x-roles: [ADULTO_ADMIN, ADULTO, HIJO]
+      parameters:
+        - name: desde
+          in: query
+          schema: { type: string, format: date }
+        - name: hasta
+          in: query
+          schema: { type: string, format: date }
+        - name: tipo
+          in: query
+          schema: { $ref: '#/components/schemas/TipoMovimiento' }
+        - $ref: '#/components/parameters/Pagina'
+        - $ref: '#/components/parameters/Tamano'
+      responses:
+        '200':
+          description: Movimientos
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginaMovimientos' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /transferencias:
+    post:
+      tags: [Cuentas]
+      operationId: transferir
+      summary: Un hijo envía monedas a un hermano con un concepto (RF-13)
+      x-roles: [HIJO]
+      x-mecanica: TRANSFERENCIAS
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TransferenciaPeticion' }
+      responses:
+        '201':
+          description: Transferencia hecha
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Movimiento' }
+        '403': { $ref: '#/components/responses/Prohibido' }
+        '409': { $ref: '#/components/responses/SaldoInsuficiente' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /ajustes:
+    post:
+      tags: [Cuentas]
+      operationId: ajusteManual
+      summary: Ingreso o retirada manual justificada en el monedero de un hijo (RF-12)
+      x-roles: [ADULTO_ADMIN, ADULTO]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AjustePeticion' }
+      responses:
+        '201':
+          description: Movimiento creado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Movimiento' }
+        '409': { $ref: '#/components/responses/SaldoInsuficiente' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /movimientos/{movimientoId}/correccion:
+    parameters:
+      - name: movimientoId
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/Id' }
+    post:
+      tags: [Cuentas]
+      operationId: corregirMovimiento
+      summary: Anula un movimiento con otro contrario enlazado (RNF-09)
+      description: El original no se toca. Un movimiento solo puede corregirse una vez.
+      x-roles: [ADULTO_ADMIN, ADULTO]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [concepto]
+              properties:
+                concepto: { type: string, maxLength: 140 }
+      responses:
+        '201':
+          description: Corrección creada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Movimiento' }
+        '409':
+          description: 'Ya corregido o el saldo no alcanza (`codigo: YA_CORREGIDO` o `SALDO_INSUFICIENTE`)'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problema' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  # ---------------------------------------------------------------- Huchas
+  /huchas:
+    post:
+      tags: [Huchas]
+      operationId: crearHucha
+      summary: Crea una hucha con nombre, meta y fecha opcional (RF-18)
+      x-roles: [HIJO]
+      x-mecanica: HUCHA_META
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HuchaPeticion' }
+      responses:
+        '201':
+          description: Hucha creada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cuenta' }
+        '403': { $ref: '#/components/responses/Prohibido' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /huchas/{cuentaId}:
+    parameters:
+      - $ref: '#/components/parameters/CuentaId'
+    patch:
+      tags: [Huchas]
+      operationId: editarHucha
+      summary: Cambia nombre, meta, fecha o icono
+      x-roles: [HIJO]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HuchaCambios' }
+      responses:
+        '200':
+          description: Hucha actualizada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cuenta' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+    delete:
+      tags: [Huchas]
+      operationId: cerrarHucha
+      summary: Cierra la hucha y devuelve su saldo al monedero
+      description: Si está bloqueada, se pierde la bonificación (flujo alternativo del CU-19).
+      x-roles: [HIJO]
+      responses:
+        '204': { description: Hucha cerrada }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /huchas/{cuentaId}/aportar:
+    parameters:
+      - $ref: '#/components/parameters/CuentaId'
+    post:
+      tags: [Huchas]
+      operationId: aportarHucha
+      summary: Mueve monedas del monedero a la hucha (RF-18)
+      x-roles: [HIJO]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CantidadPeticion' }
+      responses:
+        '201':
+          description: Aportación hecha; si se alcanza la meta se publica el evento META_CUMPLIDA
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Movimiento' }
+        '409': { $ref: '#/components/responses/SaldoInsuficiente' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /huchas/{cuentaId}/retirar:
+    parameters:
+      - $ref: '#/components/parameters/CuentaId'
+    post:
+      tags: [Huchas]
+      operationId: retirarHucha
+      summary: Mueve monedas de la hucha al monedero
+      description: Si la hucha está bloqueada, responde 409 `HUCHA_BLOQUEADA` salvo que se envíe `renunciarBonificacion`.
+      x-roles: [HIJO]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CantidadPeticion'
+                - type: object
+                  properties:
+                    renunciarBonificacion: { type: boolean, default: false }
+      responses:
+        '201':
+          description: Retirada hecha
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Movimiento' }
+        '409':
+          description: Saldo insuficiente o hucha bloqueada
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problema' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /huchas/{cuentaId}/bloquear:
+    parameters:
+      - $ref: '#/components/parameters/CuentaId'
+    post:
+      tags: [Huchas]
+      operationId: bloquearHucha
+      summary: Bloquea la hucha hasta una fecha a cambio de una bonificación (RF-20)
+      x-roles: [HIJO]
+      x-mecanica: HUCHA_BLOQUEADA
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [hasta]
+              properties:
+                hasta: { type: string, format: date }
+      responses:
+        '200':
+          description: Hucha bloqueada; la respuesta incluye la bonificación prometida
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cuenta' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  # ---------------------------------------------------------------- Reglas
+  /miembros/{miembroId}/paga:
+    parameters:
+      - $ref: '#/components/parameters/MiembroId'
+    get:
+      tags: [Reglas]
+      operationId: obtenerPaga
+      summary: Paga configurada de un hijo (RF-11)
+      x-roles: [ADULTO_ADMIN, ADULTO, HIJO]
+      responses:
+        '200':
+          description: Regla de paga
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReglaPaga' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+    put:
+      tags: [Reglas]
+      operationId: configurarPaga
+      summary: Crea o cambia la paga periódica y su reparto (RF-11)
+      x-roles: [ADULTO_ADMIN, ADULTO]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReglaPaga' }
+      responses:
+        '200':
+          description: Paga guardada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReglaPaga' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+    delete:
+      tags: [Reglas]
+      operationId: quitarPaga
+      summary: Deja de ingresar la paga
+      x-roles: [ADULTO_ADMIN, ADULTO]
+      responses:
+        '204': { description: Paga eliminada }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /reglas/interes:
+    get:
+      tags: [Reglas]
+      operationId: obtenerInteres
+      summary: Regla de interés de la familia
+      x-roles: [ADULTO_ADMIN, ADULTO, HIJO]
+      responses:
+        '200':
+          description: Regla
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReglaInteres' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+    put:
+      tags: [Reglas]
+      operationId: configurarInteres
+      summary: Tipo, modalidad y periodicidad del interés de las huchas (RF-19)
+      description: |
+        Se liquida al cierre de cada periodo sobre el saldo de cada hucha de los hijos que
+        tengan desbloqueada la mecánica. En modalidad SIMPLE la base es lo aportado (sin los
+        intereses anteriores); en COMPUESTO, el saldo completo. Se redondea hacia abajo.
+      x-roles: [ADULTO_ADMIN, ADULTO]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReglaInteres' }
+      responses:
+        '200':
+          description: Regla guardada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReglaInteres' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /reglas/inflacion:
+    get:
+      tags: [Reglas]
+      operationId: obtenerInflacion
+      summary: Regla de inflación de la tienda
+      x-roles: [ADULTO_ADMIN, ADULTO, HIJO]
+      responses:
+        '200':
+          description: Regla
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReglaInflacion' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+    put:
+      tags: [Reglas]
+      operationId: configurarInflacion
+      summary: Activa la inflación mensual de los precios de la tienda (RF-17)
+      x-roles: [ADULTO_ADMIN, ADULTO]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReglaInflacion' }
+      responses:
+        '200':
+          description: Regla guardada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReglaInflacion' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  # ---------------------------------------------------------------- Tareas
+  /plantillas/tareas:
+    get:
+      tags: [Tareas]
+      operationId: plantillasTareas
+      summary: Plantillas de tareas habituales (RF-37)
+      x-roles: [ADULTO_ADMIN, ADULTO]
+      responses:
+        '200':
+          description: Plantillas
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PlantillaTarea' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /tareas:
+    get:
+      tags: [Tareas]
+      operationId: listarTareas
+      summary: Definiciones de tareas de la familia
+      x-roles: [ADULTO_ADMIN, ADULTO]
+      parameters:
+        - name: incluirArchivadas
+          in: query
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: Tareas
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Tarea' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+    post:
+      tags: [Tareas]
+      operationId: crearTarea
+      summary: Crea una tarea puntual o periódica con recompensa (RF-06)
+      x-roles: [ADULTO_ADMIN, ADULTO]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TareaPeticion' }
+      responses:
+        '201':
+          description: Tarea creada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tarea' }
+        '400': { $ref: '#/components/responses/Invalida' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /tareas/{tareaId}:
+    parameters:
+      - name: tareaId
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/Id' }
+    patch:
+      tags: [Tareas]
+      operationId: editarTarea
+      summary: Edita una tarea; los cambios afectan a las asignaciones futuras
+      x-roles: [ADULTO_ADMIN, ADULTO]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TareaPeticion' }
+      responses:
+        '200':
+          description: Tarea actualizada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tarea' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+    delete:
+      tags: [Tareas]
+      operationId: archivarTarea
+      summary: Archiva la tarea (no se borra porque hay asignaciones cobradas)
+      x-roles: [ADULTO_ADMIN, ADULTO]
+      responses:
+        '204': { description: Tarea archivada }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /asignaciones:
+    get:
+      tags: [Tareas]
+      operationId: listarAsignaciones
+      summary: Tareas que tiene que hacer cada hijo en una fecha, o las pendientes de revisar
+      description: |
+        Un hijo solo recibe las suyas. Las de las tareas periódicas se generan al consultar
+        el día. Con `estado=HECHA` el adulto obtiene su bandeja de tareas por aprobar.
+      x-roles: [ADULTO_ADMIN, ADULTO, HIJO]
+      parameters:
+        - name: hijoId
+          in: query
+          schema: { $ref: '#/components/schemas/Id' }
+        - name: fecha
+          in: query
+          description: Por defecto, hoy (Europe/Madrid).
+          schema: { type: string, format: date }
+        - name: estado
+          in: query
+          schema: { $ref: '#/components/schemas/EstadoAsignacion' }
+      responses:
+        '200':
+          description: Asignaciones
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Asignacion' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /asignaciones/{asignacionId}/hecha:
+    parameters:
+      - $ref: '#/components/parameters/AsignacionId'
+    post:
+      tags: [Tareas]
+      operationId: marcarHecha
+      summary: El hijo marca su tarea como hecha (RF-07)
+      x-roles: [HIJO]
+      responses:
+        '200':
+          description: Tarea en estado HECHA; se avisa a los adultos
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Asignacion' }
+        '409': { $ref: '#/components/responses/EstadoInvalido' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /asignaciones/{asignacionId}/aprobar:
+    parameters:
+      - $ref: '#/components/parameters/AsignacionId'
+    post:
+      tags: [Tareas]
+      operationId: aprobarTarea
+      summary: Aprueba una tarea hecha e ingresa la recompensa (RF-08)
+      description: |
+        En una sola transacción: crea el movimiento BANCO → monedero, pasa la asignación a
+        APROBADA y publica TAREA_APROBADA (experiencia, logros, notificación). Si dos adultos
+        aprueban a la vez, el segundo recibe 409.
+      x-roles: [ADULTO_ADMIN, ADULTO]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Tarea aprobada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Asignacion' }
+        '409': { $ref: '#/components/responses/EstadoInvalido' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /asignaciones/{asignacionId}/rechazar:
+    parameters:
+      - $ref: '#/components/parameters/AsignacionId'
+    post:
+      tags: [Tareas]
+      operationId: rechazarTarea
+      summary: Rechaza una tarea hecha con un comentario; vuelve a PENDIENTE (RF-08)
+      x-roles: [ADULTO_ADMIN, ADULTO]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [comentario]
+              properties:
+                comentario: { type: string, minLength: 1, maxLength: 280 }
+      responses:
+        '200':
+          description: Tarea devuelta a pendiente
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Asignacion' }
+        '409': { $ref: '#/components/responses/EstadoInvalido' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  # ---------------------------------------------------------------- Tienda
+  /categorias:
+    get:
+      tags: [Tienda]
+      operationId: listarCategorias
+      summary: Categorías de gasto (RF-16)
+      x-roles: [ADULTO_ADMIN, ADULTO, HIJO]
+      responses:
+        '200':
+          description: Categorías
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Categoria' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /plantillas/recompensas:
+    get:
+      tags: [Tienda]
+      operationId: plantillasRecompensas
+      summary: Plantillas de recompensas habituales (RF-37)
+      x-roles: [ADULTO_ADMIN, ADULTO]
+      responses:
+        '200':
+          description: Plantillas
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PlantillaRecompensa' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /recompensas:
+    get:
+      tags: [Tienda]
+      operationId: listarRecompensas
+      summary: Catálogo de la tienda familiar
+      x-roles: [ADULTO_ADMIN, ADULTO, HIJO]
+      responses:
+        '200':
+          description: Recompensas
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Recompensa' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+    post:
+      tags: [Tienda]
+      operationId: crearRecompensa
+      summary: Publica una recompensa con precio en monedas o en euros (RF-14, RF-35)
+      description: Si se envía `precioEuros`, el servidor lo convierte con `monedasPorEuro`.
+      x-roles: [ADULTO_ADMIN, ADULTO]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RecompensaPeticion' }
+      responses:
+        '201':
+          description: Recompensa creada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Recompensa' }
+        '400': { $ref: '#/components/responses/Invalida' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /recompensas/{recompensaId}:
+    parameters:
+      - $ref: '#/components/parameters/RecompensaId'
+    patch:
+      tags: [Tienda]
+      operationId: editarRecompensa
+      summary: Edita una recompensa (queda en el historial de precios)
+      x-roles: [ADULTO_ADMIN, ADULTO]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RecompensaPeticion' }
+      responses:
+        '200':
+          description: Recompensa actualizada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Recompensa' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+    delete:
+      tags: [Tienda]
+      operationId: archivarRecompensa
+      summary: Retira la recompensa de la tienda
+      x-roles: [ADULTO_ADMIN, ADULTO]
+      responses:
+        '204': { description: Recompensa archivada }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /recompensas/{recompensaId}/precios:
+    parameters:
+      - $ref: '#/components/parameters/RecompensaId'
+    get:
+      tags: [Tienda]
+      operationId: historialPrecios
+      summary: Evolución del precio de una recompensa (inflación, RF-17)
+      x-roles: [ADULTO_ADMIN, ADULTO, HIJO]
+      responses:
+        '200':
+          description: Precios
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PrecioHistorico' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /recompensas/{recompensaId}/comprar:
+    parameters:
+      - $ref: '#/components/parameters/RecompensaId'
+    post:
+      tags: [Tienda]
+      operationId: comprarRecompensa
+      summary: Un hijo compra una recompensa si le llega el saldo (RF-15)
+      description: |
+        En una sola transacción: comprueba precio y existencias, crea el movimiento
+        monedero → BANCO con la categoría de la recompensa, resta una existencia y crea la
+        compra PEDIDA. Si la recompensa es de DINERO_REAL, crea además el pago pendiente
+        (RF-36). Publica COMPRA_REALIZADA (presupuesto, logros, aviso a los adultos).
+      x-roles: [HIJO]
+      x-mecanica: TIENDA
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                precioEsperado:
+                  type: integer
+                  format: int64
+                  description: |
+                    El precio que vio el hijo. Si ha cambiado (inflación), responde 409
+                    `PRECIO_CAMBIADO` para que no pague más de lo que creía.
+      responses:
+        '201':
+          description: Compra realizada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Compra' }
+        '403': { $ref: '#/components/responses/Prohibido' }
+        '409':
+          description: Saldo insuficiente, agotada o precio cambiado (`SALDO_INSUFICIENTE`, `AGOTADA`, `PRECIO_CAMBIADO`)
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problema' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /compras:
+    get:
+      tags: [Tienda]
+      operationId: listarCompras
+      summary: Compras de la familia o del hijo que pregunta
+      x-roles: [ADULTO_ADMIN, ADULTO, HIJO]
+      parameters:
+        - name: estado
+          in: query
+          schema: { $ref: '#/components/schemas/EstadoCompra' }
+        - name: hijoId
+          in: query
+          schema: { $ref: '#/components/schemas/Id' }
+      responses:
+        '200':
+          description: Compras
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Compra' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /compras/{compraId}/entregar:
+    parameters:
+      - $ref: '#/components/parameters/CompraId'
+    post:
+      tags: [Tienda]
+      operationId: entregarCompra
+      summary: El adulto confirma que ha entregado la recompensa (RF-15)
+      x-roles: [ADULTO_ADMIN, ADULTO]
+      responses:
+        '200':
+          description: Compra entregada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Compra' }
+        '409': { $ref: '#/components/responses/EstadoInvalido' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /compras/{compraId}/cancelar:
+    parameters:
+      - $ref: '#/components/parameters/CompraId'
+    post:
+      tags: [Tienda]
+      operationId: cancelarCompra
+      summary: Cancela una compra no entregada y devuelve las monedas
+      x-roles: [ADULTO_ADMIN, ADULTO]
+      responses:
+        '200':
+          description: Compra cancelada con su movimiento de devolución
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Compra' }
+        '409': { $ref: '#/components/responses/EstadoInvalido' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /canjes:
+    post:
+      tags: [Tienda]
+      operationId: canjearEuros
+      summary: Un hijo canjea monedas por euros (RF-36)
+      description: |
+        Mueve las monedas del monedero al BANCO y crea un pago pendiente «Debes X € a
+        [hijo]». Las monedas deben ser múltiplo de `monedasPorEuro / 100` para que el
+        importe salga en céntimos exactos; si no, responde 400.
+      x-roles: [HIJO]
+      x-mecanica: TIENDA
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CantidadPeticion' }
+      responses:
+        '201':
+          description: Pago pendiente creado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PagoPendiente' }
+        '409': { $ref: '#/components/responses/SaldoInsuficiente' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /pagos-pendientes:
+    get:
+      tags: [Tienda]
+      operationId: listarPagosPendientes
+      summary: Dinero real que los padres deben a cada hijo (RF-36)
+      x-roles: [ADULTO_ADMIN, ADULTO, HIJO]
+      parameters:
+        - name: estado
+          in: query
+          schema: { type: string, enum: [PENDIENTE, PAGADO], default: PENDIENTE }
+      responses:
+        '200':
+          description: Pagos
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PagoPendiente' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /pagos-pendientes/{pagoId}/pagado:
+    parameters:
+      - name: pagoId
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/Id' }
+    post:
+      tags: [Tienda]
+      operationId: marcarPagado
+      summary: El adulto marca que ha dado el dinero en mano
+      x-roles: [ADULTO_ADMIN, ADULTO]
+      responses:
+        '200':
+          description: Pago marcado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PagoPendiente' }
+        '409': { $ref: '#/components/responses/EstadoInvalido' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  # ---------------------------------------------------------------- Presupuesto
+  /miembros/{miembroId}/presupuestos/{semana}:
+    parameters:
+      - $ref: '#/components/parameters/MiembroId'
+      - name: semana
+        in: path
+        required: true
+        description: Lunes de la semana (AAAA-MM-DD) o `actual`.
+        schema: { type: string, examples: ['2026-11-16', actual] }
+    get:
+      tags: [Presupuesto]
+      operationId: obtenerPresupuesto
+      summary: Presupuesto de una semana con lo gastado en cada partida (RF-21)
+      x-roles: [ADULTO_ADMIN, ADULTO, HIJO]
+      responses:
+        '200':
+          description: Presupuesto
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Presupuesto' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+    put:
+      tags: [Presupuesto]
+      operationId: definirPresupuesto
+      summary: El hijo reparte su gasto previsto por categorías (RF-21)
+      description: Solo para la semana actual o futuras. La semana se cierra el domingo a las 23:59.
+      x-roles: [HIJO]
+      x-mecanica: PRESUPUESTO
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [partidas]
+              properties:
+                partidas:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [categoriaId, limite]
+                    properties:
+                      categoriaId: { $ref: '#/components/schemas/Id' }
+                      limite: { $ref: '#/components/schemas/Monedas0' }
+      responses:
+        '200':
+          description: Presupuesto guardado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Presupuesto' }
+        '409':
+          description: 'Semana ya cerrada (`codigo: SEMANA_CERRADA`)'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problema' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  # ---------------------------------------------------------------- Estadísticas
+  /miembros/{miembroId}/estadisticas:
+    parameters:
+      - $ref: '#/components/parameters/MiembroId'
+    get:
+      tags: [Estadísticas]
+      operationId: estadisticasMiembro
+      summary: Datos para las gráficas de saldo, gastos, ahorro e interés (RF-26)
+      x-roles: [ADULTO_ADMIN, ADULTO, HIJO]
+      parameters:
+        - name: desde
+          in: query
+          schema: { type: string, format: date }
+        - name: hasta
+          in: query
+          schema: { type: string, format: date }
+        - name: agrupacion
+          in: query
+          schema: { type: string, enum: [DIA, SEMANA, MES], default: SEMANA }
+      responses:
+        '200':
+          description: Estadísticas
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Estadisticas' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  # ---------------------------------------------------------------- Cuestionarios
+  /cuestionarios/{codigo}:
+    parameters:
+      - $ref: '#/components/parameters/CodigoCuestionario'
+    get:
+      tags: [Cuestionarios]
+      operationId: obtenerCuestionario
+      summary: Preguntas del cuestionario de conocimientos, sin las respuestas correctas (RF-44)
+      x-roles: [ADULTO_ADMIN, ADULTO, HIJO]
+      responses:
+        '200':
+          description: Cuestionario
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cuestionario' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /cuestionarios/{codigo}/intentos:
+    parameters:
+      - $ref: '#/components/parameters/CodigoCuestionario'
+    post:
+      tags: [Cuestionarios]
+      operationId: responderCuestionario
+      summary: Envía las respuestas del cuestionario inicial o final (RF-44)
+      x-roles: [ADULTO_ADMIN, ADULTO, HIJO]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IntentoPeticion' }
+      responses:
+        '201':
+          description: Resultado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IntentoResultado' }
+        '409':
+          description: 'Ese momento ya está respondido (`codigo: YA_RESPONDIDO`)'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problema' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+  /cuestionarios/resultados:
+    get:
+      tags: [Cuestionarios]
+      operationId: resultadosCuestionarios
+      summary: Resultado inicial y final de cada miembro, por área PISA (evaluación)
+      x-roles: [ADULTO_ADMIN, ADULTO]
+      responses:
+        '200':
+          description: Resultados de la familia
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/IntentoResultado' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    MiembroId:
+      name: miembroId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/Id' }
+    CuentaId:
+      name: cuentaId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/Id' }
+    AsignacionId:
+      name: asignacionId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/Id' }
+    RecompensaId:
+      name: recompensaId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/Id' }
+    CompraId:
+      name: compraId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/Id' }
+    CodigoCuestionario:
+      name: codigo
+      in: path
+      required: true
+      schema: { type: string, examples: [CONOCIMIENTOS_HIJOS] }
+    Pagina:
+      name: pagina
+      in: query
+      schema: { type: integer, minimum: 0, default: 0 }
+    Tamano:
+      name: tamano
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: Identificador único (UUID) generado por la app para esta operación.
+      schema: { type: string, maxLength: 64 }
+
+  responses:
+    Invalida:
+      description: 'Datos no válidos (`codigo: DATOS_INVALIDOS`)'
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problema' }
+    NoAutenticado:
+      description: 'Credenciales o token no válidos (`codigo: NO_AUTENTICADO`)'
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problema' }
+    Prohibido:
+      description: El rol no lo permite o la mecánica está bloqueada (`PROHIBIDO`, `MECANICA_BLOQUEADA`)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problema' }
+    NoEncontrado:
+      description: 'No existe o es de otra familia (`codigo: NO_ENCONTRADO`)'
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problema' }
+    SaldoInsuficiente:
+      description: 'No hay saldo suficiente (`codigo: SALDO_INSUFICIENTE`)'
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problema' }
+    EstadoInvalido:
+      description: 'La operación no es válida en el estado actual (`codigo: ESTADO_INVALIDO`)'
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problema' }
+
+  schemas:
+    Id:
+      type: integer
+      format: int64
+      minimum: 1
+    Monedas:
+      type: integer
+      format: int64
+      minimum: 1
+      description: Cantidad de monedas, entera y positiva (RNF-07).
+    Monedas0:
+      type: integer
+      format: int64
+      minimum: 0
+    Rol:
+      type: string
+      enum: [ADULTO_ADMIN, ADULTO, HIJO]
+    AreaPisa:
+      type: string
+      enum: [DT, PG, RR, PF]
+      description: Dinero y transacciones, Planificación y gestión, Riesgo y recompensa, Panorama financiero.
+    TipoCuenta:
+      type: string
+      enum: [BANCO, MONEDERO, HUCHA]
+    TipoMovimiento:
+      type: string
+      enum: [RECOMPENSA_TAREA, PAGA, COMPRA, DEVOLUCION_COMPRA, AHORRO, RETIRADA_HUCHA, INTERES,
+             BONIFICACION_BLOQUEO, CANJE_EUROS, TRANSFERENCIA, AJUSTE_MANUAL, CORRECCION]
+    EstadoAsignacion:
+      type: string
+      enum: [PENDIENTE, HECHA, APROBADA, RECHAZADA, CADUCADA]
+    EstadoCompra:
+      type: string
+      enum: [PEDIDA, ENTREGADA, CANCELADA]
+    TipoRecompensa:
+      type: string
+      enum: [REGALO, DINERO_REAL, ACTIVIDAD]
+    Periodicidad:
+      type: string
+      enum: [SEMANAL, MENSUAL]
+
+    Problema:
+      type: object
+      description: Error según RFC 9457.
+      required: [title, status, codigo]
+      properties:
+        type: { type: string, format: uri, default: about:blank }
+        title: { type: string, examples: [Saldo insuficiente] }
+        status: { type: integer, examples: [409] }
+        detail: { type: string, examples: ['Te faltan 15 monedas para comprar «Helado»'] }
+        codigo:
+          type: string
+          examples: [SALDO_INSUFICIENTE]
+          description: |
+            Códigos: DATOS_INVALIDOS, NO_AUTENTICADO, PROHIBIDO, MECANICA_BLOQUEADA, NO_ENCONTRADO,
+            CORREO_EN_USO, CODIGO_CADUCADO, DEMASIADOS_INTENTOS, SALDO_INSUFICIENTE, ESTADO_INVALIDO,
+            AGOTADA, PRECIO_CAMBIADO, HUCHA_BLOQUEADA, YA_CORREGIDO, SEMANA_CERRADA, YA_RESPONDIDO.
+        errores:
+          type: array
+          description: Detalle por campo en DATOS_INVALIDOS.
+          items:
+            type: object
+            properties:
+              campo: { type: string }
+              mensaje: { type: string }
+
+    # ---- Acceso
+    RegistroPeticion:
+      type: object
+      required: [nombreFamilia, nombre, email, contrasena, aceptaPrivacidad]
+      properties:
+        nombreFamilia: { type: string, maxLength: 60, examples: [Familia Morales] }
+        nombre: { type: string, maxLength: 40 }
+        email: { type: string, format: email }
+        contrasena: { type: string, minLength: 8, maxLength: 72, writeOnly: true }
+        aceptaPrivacidad: { type: boolean, const: true }
+    LoginPeticion:
+      type: object
+      required: [email, contrasena]
+      properties:
+        email: { type: string, format: email }
+        contrasena: { type: string, writeOnly: true }
+        nombreDispositivo: { type: string, maxLength: 60 }
+    VincularPeticion:
+      type: object
+      required: [codigo, nombreDispositivo]
+      properties:
+        codigo: { type: string, examples: [K7M2-9QXP] }
+        nombreDispositivo: { type: string, maxLength: 60, examples: [Tablet de Lucía] }
+    UnirsePeticion:
+      type: object
+      required: [codigo, nombre, email, contrasena, aceptaPrivacidad]
+      properties:
+        codigo: { type: string }
+        nombre: { type: string, maxLength: 40 }
+        email: { type: string, format: email }
+        contrasena: { type: string, minLength: 8, maxLength: 72, writeOnly: true }
+        aceptaPrivacidad: { type: boolean, const: true }
+    RefrescarPeticion:
+      type: object
+      required: [tokenRefresco]
+      properties:
+        tokenRefresco: { type: string }
+        pin: { type: string, pattern: '^[0-9]{4,6}$', writeOnly: true }
+    Sesion:
+      type: object
+      required: [tokenAcceso, tokenRefresco, expiraEn, miembro]
+      properties:
+        tokenAcceso: { type: string, description: JWT de 15 minutos }
+        tokenRefresco: { type: string, description: Opaco; se rota en cada uso }
+        expiraEn: { type: string, format: date-time }
+        miembro: { $ref: '#/components/schemas/Miembro' }
+    CodigoAcceso:
+      type: object
+      required: [codigo, expiraEn]
+      properties:
+        codigo: { type: string, examples: [K7M2-9QXP] }
+        expiraEn: { type: string, format: date-time }
+        contenidoQr: { type: string, description: Texto que la app pinta como QR, examples: ['tfgfamilia://vincular?codigo=K7M2-9QXP'] }
+    Dispositivo:
+      type: object
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        nombre: { type: string }
+        creadoEn: { type: string, format: date-time }
+        ultimoUsoEn: { type: [string, 'null'], format: date-time }
+
+    # ---- Familia
+    Familia:
+      type: object
+      required: [id, nombre, nombreMoneda, monedasPorEuro]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        nombre: { type: string }
+        nombreMoneda: { type: string, examples: [monedas] }
+        monedasPorEuro: { type: integer, minimum: 1, examples: [10] }
+    FamiliaCambios:
+      type: object
+      minProperties: 1
+      properties:
+        nombre: { type: string, maxLength: 60 }
+        nombreMoneda: { type: string, maxLength: 30 }
+        monedasPorEuro: { type: integer, minimum: 1 }
+    Miembro:
+      type: object
+      required: [id, rol, nombre, avatar]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        rol: { $ref: '#/components/schemas/Rol' }
+        nombre: { type: string }
+        avatar: { type: string }
+        anioNacimiento: { type: [integer, 'null'] }
+        nivel: { type: integer }
+        etapa: { type: integer, minimum: 1, maximum: 5 }
+    AltaHijoPeticion:
+      type: object
+      required: [nombre, avatar, consentimiento]
+      properties:
+        nombre: { type: string, maxLength: 40, examples: [Lucía] }
+        avatar: { type: string, examples: [avatar-3] }
+        anioNacimiento: { type: integer, minimum: 2005, maximum: 2022 }
+        pin: { type: string, pattern: '^[0-9]{4,6}$', writeOnly: true }
+        consentimiento:
+          type: boolean
+          const: true
+          description: El adulto acepta el tratamiento de los datos del menor (RNF-06).
+    MiembroCambios:
+      type: object
+      minProperties: 1
+      properties:
+        nombre: { type: string, maxLength: 40 }
+        avatar: { type: string }
+        anioNacimiento: { type: integer, minimum: 2005, maximum: 2022 }
+        pin: { type: string, pattern: '^[0-9]{4,6}$', writeOnly: true }
+    ResumenFamilia:
+      type: object
+      properties:
+        tareasPorRevisar: { type: integer }
+        comprasPorEntregar: { type: integer }
+        totalDebidoCentimos: { type: integer, format: int64 }
+        hijos:
+          type: array
+          items:
+            type: object
+            properties:
+              miembro: { $ref: '#/components/schemas/Miembro' }
+              saldoMonedero: { $ref: '#/components/schemas/Monedas0' }
+              saldoHuchas: { $ref: '#/components/schemas/Monedas0' }
+              gastadoEstaSemana: { $ref: '#/components/schemas/Monedas0' }
+              ahorradoEstaSemana: { $ref: '#/components/schemas/Monedas0' }
+
+    # ---- Progreso
+    Progreso:
+      type: object
+      properties:
+        miembroId: { $ref: '#/components/schemas/Id' }
+        nivel: { type: integer }
+        experiencia: { type: integer }
+        experienciaNivelActual: { type: integer, description: XP con la que empezó el nivel }
+        experienciaSiguienteNivel: { type: integer }
+        etapa: { type: integer }
+        etapaFijada: { type: [integer, 'null'] }
+        nombreEtapa: { type: string, examples: [Aprendo a planificar] }
+        logros:
+          type: array
+          items: { $ref: '#/components/schemas/LogroConseguido' }
+    LogroConseguido:
+      type: object
+      properties:
+        codigo: { type: string, examples: [PRIMERA_META] }
+        nombre: { type: string }
+        descripcion: { type: string }
+        concepto: { type: string }
+        areaPisa: { $ref: '#/components/schemas/AreaPisa' }
+        icono: { type: string }
+        conseguidoEn: { type: [string, 'null'], format: date-time }
+    HitoFamiliar:
+      type: object
+      properties:
+        logro: { $ref: '#/components/schemas/LogroConseguido' }
+        conseguidoPor:
+          type: array
+          items: { $ref: '#/components/schemas/Id' }
+        faltan:
+          type: array
+          items: { $ref: '#/components/schemas/Id' }
+    EventoExperiencia:
+      type: object
+      properties:
+        puntos: { type: integer }
+        motivo: { type: string, examples: [META_CUMPLIDA] }
+        creadoEn: { type: string, format: date-time }
+    PaginaEventosExperiencia:
+      type: object
+      properties:
+        contenido:
+          type: array
+          items: { $ref: '#/components/schemas/EventoExperiencia' }
+        pagina: { type: integer }
+        totalElementos: { type: integer, format: int64 }
+    MecanicaMiembro:
+      type: object
+      required: [codigo, nombre, estado]
+      properties:
+        codigo: { type: string, examples: [INTERES_SIMPLE] }
+        nombre: { type: string }
+        concepto: { type: string }
+        areaPisa: { $ref: '#/components/schemas/AreaPisa' }
+        etapa: { type: integer }
+        nivelMinimo: { type: integer }
+        estado: { type: string, enum: [DESBLOQUEADA, BLOQUEADA, NO_DISPONIBLE] }
+        ajuste: { type: string, enum: [ACTIVADA, DESACTIVADA, AUTOMATICA] }
+        desbloqueo: { type: [string, 'null'], examples: ['Se desbloquea en el nivel 5'] }
+
+    # ---- Cuentas
+    Cuenta:
+      type: object
+      required: [id, tipo, nombre, saldo]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        tipo: { $ref: '#/components/schemas/TipoCuenta' }
+        titularId: { type: [integer, 'null'], format: int64 }
+        nombre: { type: string }
+        saldo: { type: integer, format: int64 }
+        saldoEuros:
+          type: number
+          description: Solo informativo, calculado con monedasPorEuro. Nunca se usa para operar.
+        icono: { type: [string, 'null'] }
+        meta: { type: [integer, 'null'], format: int64 }
+        progresoMeta: { type: [number, 'null'], minimum: 0, maximum: 1 }
+        fechaObjetivo: { type: [string, 'null'], format: date }
+        bloqueadaHasta: { type: [string, 'null'], format: date }
+        bonificacionPrometida: { type: [integer, 'null'], format: int64 }
+        interesGenerado: { type: integer, format: int64, description: Total de movimientos INTERES recibidos }
+    Movimiento:
+      type: object
+      required: [id, tipo, cantidad, concepto, creadoEn]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        tipo: { $ref: '#/components/schemas/TipoMovimiento' }
+        cantidad: { $ref: '#/components/schemas/Monedas' }
+        sentido:
+          type: string
+          enum: [ENTRADA, SALIDA]
+          description: Respecto a la cuenta consultada en el historial.
+        cuentaOrigenId: { $ref: '#/components/schemas/Id' }
+        cuentaDestinoId: { $ref: '#/components/schemas/Id' }
+        concepto: { type: string }
+        categoria: { oneOf: [{ $ref: '#/components/schemas/Categoria' }, { type: 'null' }] }
+        autorId: { type: [integer, 'null'], format: int64, description: null = sistema }
+        corrigeAId: { type: [integer, 'null'], format: int64 }
+        creadoEn: { type: string, format: date-time }
+        saldoTras: { type: integer, format: int64, description: Saldo de la cuenta consultada tras el movimiento }
+    PaginaMovimientos:
+      type: object
+      properties:
+        contenido:
+          type: array
+          items: { $ref: '#/components/schemas/Movimiento' }
+        pagina: { type: integer }
+        tamano: { type: integer }
+        totalElementos: { type: integer, format: int64 }
+    TransferenciaPeticion:
+      type: object
+      required: [destinatarioId, cantidad, concepto]
+      properties:
+        destinatarioId: { $ref: '#/components/schemas/Id' }
+        cantidad: { $ref: '#/components/schemas/Monedas' }
+        concepto: { type: string, maxLength: 140 }
+    AjustePeticion:
+      type: object
+      required: [hijoId, cantidad, concepto]
+      properties:
+        hijoId: { $ref: '#/components/schemas/Id' }
+        cantidad:
+          type: integer
+          format: int64
+          not: { const: 0 }
+          description: Positiva = ingreso, negativa = retirada.
+        concepto: { type: string, minLength: 3, maxLength: 140 }
+    CantidadPeticion:
+      type: object
+      required: [cantidad]
+      properties:
+        cantidad: { $ref: '#/components/schemas/Monedas' }
+
+    # ---- Huchas
+    HuchaPeticion:
+      type: object
+      required: [nombre, meta]
+      properties:
+        nombre: { type: string, maxLength: 60, examples: [Bici nueva] }
+        meta: { $ref: '#/components/schemas/Monedas' }
+        fechaObjetivo: { type: string, format: date }
+        icono: { type: string }
+    HuchaCambios:
+      type: object
+      minProperties: 1
+      properties:
+        nombre: { type: string, maxLength: 60 }
+        meta: { $ref: '#/components/schemas/Monedas' }
+        fechaObjetivo: { type: [string, 'null'], format: date }
+        icono: { type: string }
+
+    # ---- Reglas
+    ReglaPaga:
+      type: object
+      required: [cantidad, periodicidad, dia]
+      properties:
+        cantidad: { $ref: '#/components/schemas/Monedas' }
+        periodicidad: { $ref: '#/components/schemas/Periodicidad' }
+        dia: { type: integer, minimum: 1, maximum: 28, description: '1-7 (lunes-domingo) si es semanal; 1-28 si es mensual' }
+        porcentajeAhorro: { type: integer, minimum: 0, maximum: 100, default: 0 }
+        huchaDestinoId: { type: [integer, 'null'], format: int64 }
+        activa: { type: boolean, default: true }
+        proximaPaga: { type: string, format: date, readOnly: true }
+    ReglaInteres:
+      type: object
+      required: [tipoPb, modalidad, periodicidad]
+      properties:
+        tipoPb: { type: integer, minimum: 1, maximum: 10000, description: 'Puntos básicos por periodo: 200 = 2 %' }
+        modalidad: { type: string, enum: [SIMPLE, COMPUESTO] }
+        periodicidad: { $ref: '#/components/schemas/Periodicidad' }
+        activa: { type: boolean, default: true }
+    ReglaInflacion:
+      type: object
+      required: [tipoMensualPb]
+      properties:
+        tipoMensualPb: { type: integer, minimum: 1, maximum: 2000, description: '100 = 1 % al mes' }
+        activa: { type: boolean, default: true }
+
+    # ---- Tareas
+    PlantillaTarea:
+      type: object
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        titulo: { type: string }
+        grupo: { type: string }
+        recompensaSugerida: { $ref: '#/components/schemas/Monedas' }
+        icono: { type: string }
+    TareaPeticion:
+      type: object
+      required: [titulo, recompensa, periodicidad, hijos]
+      properties:
+        titulo: { type: string, maxLength: 80 }
+        descripcion: { type: string, maxLength: 500 }
+        recompensa: { $ref: '#/components/schemas/Monedas' }
+        periodicidad: { type: string, enum: [UNICA, DIARIA, SEMANAL] }
+        diasSemana:
+          type: array
+          description: Obligatorio si es SEMANAL.
+          items: { type: string, enum: [LUNES, MARTES, MIERCOLES, JUEVES, VIERNES, SABADO, DOMINGO] }
+          uniqueItems: true
+        fechaLimite: { type: string, format: date }
+        icono: { type: string }
+        hijos:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/Id' }
+        plantillaId: { $ref: '#/components/schemas/Id' }
+    Tarea:
+      allOf:
+        - $ref: '#/components/schemas/TareaPeticion'
+        - type: object
+          required: [id]
+          properties:
+            id: { $ref: '#/components/schemas/Id' }
+            archivada: { type: boolean }
+    Asignacion:
+      type: object
+      required: [id, tareaId, hijoId, fecha, estado]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        tareaId: { $ref: '#/components/schemas/Id' }
+        titulo: { type: string }
+        icono: { type: string }
+        recompensa: { $ref: '#/components/schemas/Monedas' }
+        hijoId: { $ref: '#/components/schemas/Id' }
+        fecha: { type: string, format: date }
+        estado: { $ref: '#/components/schemas/EstadoAsignacion' }
+        hechaEn: { type: [string, 'null'], format: date-time }
+        comentario: { type: [string, 'null'] }
+        movimientoId: { type: [integer, 'null'], format: int64 }
+
+    # ---- Tienda
+    Categoria:
+      type: object
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        nombre: { type: string, examples: [Chuches y caprichos] }
+        icono: { type: string }
+    PlantillaRecompensa:
+      type: object
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        nombre: { type: string }
+        tipo: { $ref: '#/components/schemas/TipoRecompensa' }
+        precioSugerido: { $ref: '#/components/schemas/Monedas' }
+        icono: { type: string }
+    RecompensaPeticion:
+      type: object
+      required: [nombre, tipo, categoriaId]
+      description: Hay que enviar `precio` (monedas) o `precioEuros`, pero no los dos.
+      properties:
+        nombre: { type: string, maxLength: 80 }
+        descripcion: { type: string, maxLength: 500 }
+        tipo: { $ref: '#/components/schemas/TipoRecompensa' }
+        categoriaId: { $ref: '#/components/schemas/Id' }
+        precio: { $ref: '#/components/schemas/Monedas' }
+        precioEuros: { type: number, exclusiveMinimum: 0, multipleOf: 0.01 }
+        existencias: { type: [integer, 'null'], minimum: 0, description: null = ilimitadas }
+        icono: { type: string }
+        plantillaId: { $ref: '#/components/schemas/Id' }
+      oneOf:
+        - required: [precio]
+        - required: [precioEuros]
+    Recompensa:
+      type: object
+      required: [id, nombre, tipo, precio]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        nombre: { type: string }
+        descripcion: { type: [string, 'null'] }
+        tipo: { $ref: '#/components/schemas/TipoRecompensa' }
+        categoria: { $ref: '#/components/schemas/Categoria' }
+        precio: { $ref: '#/components/schemas/Monedas' }
+        precioEuros: { type: number, description: Informativo }
+        existencias: { type: [integer, 'null'] }
+        icono: { type: string }
+        archivada: { type: boolean }
+    PrecioHistorico:
+      type: object
+      properties:
+        desde: { type: string, format: date-time }
+        precio: { $ref: '#/components/schemas/Monedas' }
+        motivo: { type: string, enum: [ALTA, EDICION, INFLACION, DEMANDA] }
+    Compra:
+      type: object
+      required: [id, recompensaId, hijoId, precioPagado, estado]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        recompensaId: { $ref: '#/components/schemas/Id' }
+        nombreRecompensa: { type: string }
+        hijoId: { $ref: '#/components/schemas/Id' }
+        precioPagado: { $ref: '#/components/schemas/Monedas' }
+        estado: { $ref: '#/components/schemas/EstadoCompra' }
+        pedidaEn: { type: string, format: date-time }
+        resueltaEn: { type: [string, 'null'], format: date-time }
+        pagoPendienteId: { type: [integer, 'null'], format: int64 }
+        saldoRestante: { $ref: '#/components/schemas/Monedas0' }
+        mensajeCosteOportunidad:
+          type: [string, 'null']
+          description: Texto educativo que muestra la app tras comprar.
+          examples: ['Con estas 20 monedas te habrían faltado 30 para tu hucha «Bici nueva»']
+    PagoPendiente:
+      type: object
+      required: [id, hijoId, importeCentimos, origen, estado]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        hijoId: { $ref: '#/components/schemas/Id' }
+        importeCentimos: { type: integer, format: int64, minimum: 1, examples: [500] }
+        origen: { type: string, enum: [CANJE, COMPRA] }
+        compraId: { type: [integer, 'null'], format: int64 }
+        estado: { type: string, enum: [PENDIENTE, PAGADO] }
+        creadoEn: { type: string, format: date-time }
+        pagadoEn: { type: [string, 'null'], format: date-time }
+
+    # ---- Presupuesto
+    Presupuesto:
+      type: object
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        hijoId: { $ref: '#/components/schemas/Id' }
+        semana: { type: string, format: date }
+        cerrado: { type: boolean }
+        cumplido: { type: [boolean, 'null'] }
+        partidas:
+          type: array
+          items:
+            type: object
+            properties:
+              categoria: { $ref: '#/components/schemas/Categoria' }
+              limite: { $ref: '#/components/schemas/Monedas0' }
+              gastado: { $ref: '#/components/schemas/Monedas0' }
+              porcentaje: { type: number }
+
+    # ---- Estadísticas
+    Estadisticas:
+      type: object
+      properties:
+        desde: { type: string, format: date }
+        hasta: { type: string, format: date }
+        agrupacion: { type: string, enum: [DIA, SEMANA, MES] }
+        serieSaldo:
+          type: array
+          description: Saldo de monedero y huchas al final de cada periodo.
+          items:
+            type: object
+            properties:
+              periodo: { type: string, format: date }
+              monedero: { type: integer, format: int64 }
+              huchas: { type: integer, format: int64 }
+        ingresosPorTipo:
+          type: object
+          additionalProperties: { type: integer, format: int64 }
+          examples: [{ RECOMPENSA_TAREA: 240, PAGA: 200, INTERES: 12 }]
+        gastosPorCategoria:
+          type: array
+          items:
+            type: object
+            properties:
+              categoria: { $ref: '#/components/schemas/Categoria' }
+              total: { type: integer, format: int64 }
+        interesGenerado: { type: integer, format: int64 }
+        tasaAhorro:
+          type: number
+          description: Ahorrado / ingresado en el intervalo, de 0 a 1.
+
+    # ---- Cuestionarios
+    Cuestionario:
+      type: object
+      properties:
+        codigo: { type: string }
+        titulo: { type: string }
+        preguntas:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { $ref: '#/components/schemas/Id' }
+              enunciado: { type: string }
+              areaPisa: { $ref: '#/components/schemas/AreaPisa' }
+              opciones:
+                type: array
+                items: { type: string }
+    IntentoPeticion:
+      type: object
+      required: [momento, respuestas]
+      properties:
+        momento: { type: string, enum: [INICIAL, FINAL] }
+        respuestas:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [preguntaId, opcion]
+            properties:
+              preguntaId: { $ref: '#/components/schemas/Id' }
+              opcion: { type: integer, minimum: 0 }
+    IntentoResultado:
+      type: object
+      properties:
+        miembroId: { $ref: '#/components/schemas/Id' }
+        cuestionario: { type: string }
+        momento: { type: string, enum: [INICIAL, FINAL] }
+        aciertos: { type: integer }
+        total: { type: integer }
+        porArea:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              aciertos: { type: integer }
+              total: { type: integer }
+        respondidoEn: { type: string, format: date-time }

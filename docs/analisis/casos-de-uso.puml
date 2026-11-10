@@ -1,0 +1,100 @@
+@startuml casos-de-uso
+' Diagrama de casos de uso del MVP para la memoria (capítulo 3.4).
+' Generar la imagen: java -jar plantuml.jar casos-de-uso.puml  (o la extensión PlantUML de VS Code)
+left to right direction
+skinparam packageStyle rectangle
+skinparam actorStyle awesome
+
+actor "Adulto" as A
+actor "Administrador" as AD
+actor "Hijo" as H
+actor "Sistema" as S <<proceso>>
+AD -|> A
+
+rectangle "App de economía familiar" {
+  package "Familia y acceso" {
+    usecase "CU-01 Registrarse y crear la familia" as CU01
+    usecase "CU-02 Invitar a otro adulto" as CU02
+    usecase "CU-03 Dar de alta a un hijo" as CU03
+    usecase "CU-04 Vincular el dispositivo del hijo" as CU04
+    usecase "CU-05 Entrar en la app" as CU05
+    usecase "CU-06 Ajustar etapa y mecánicas" as CU06
+  }
+  package "Tareas" {
+    usecase "CU-07 Gestionar tareas" as CU07
+    usecase "CU-08 Marcar tarea hecha" as CU08
+    usecase "CU-09 Revisar tarea" as CU09
+  }
+  package "Dinero" {
+    usecase "CU-10 Consultar monedero e historial" as CU10
+    usecase "CU-11 Ajuste o corrección manual" as CU11
+    usecase "CU-12 Configurar la paga" as CU12
+    usecase "CU-13 Ingresar la paga" as CU13
+    usecase "CU-14 Transferir a un hermano" as CU14
+  }
+  package "Tienda" {
+    usecase "CU-15 Gestionar la tienda" as CU15
+    usecase "CU-16 Comprar una recompensa" as CU16
+    usecase "CU-17 Entregar o cancelar compra" as CU17
+    usecase "CU-18 Canjear monedas por euros" as CU18
+    usecase "CU-19 Saldar un pago pendiente" as CU19
+  }
+  package "Ahorro" {
+    usecase "CU-20 Ahorrar en una hucha" as CU20
+    usecase "CU-21 Bloquear una hucha" as CU21
+    usecase "CU-22 Configurar interés e inflación" as CU22
+    usecase "CU-23 Liquidar intereses e inflación" as CU23
+  }
+  package "Planificación y progreso" {
+    usecase "CU-24 Definir presupuesto semanal" as CU24
+    usecase "CU-25 Cerrar la semana" as CU25
+    usecase "CU-26 Conceder experiencia y logros" as CU26
+    usecase "CU-27 Ver progreso e hitos" as CU27
+    usecase "CU-28 Ver estadísticas" as CU28
+    usecase "CU-29 Responder el cuestionario" as CU29
+  }
+}
+
+AD --> CU02
+A --> CU01
+A --> CU03
+A --> CU04
+A --> CU05
+A --> CU06
+A --> CU07
+A --> CU09
+A --> CU10
+A --> CU11
+A --> CU12
+A --> CU15
+A --> CU17
+A --> CU19
+A --> CU22
+A --> CU27
+A --> CU28
+A --> CU29
+
+H --> CU04
+H --> CU05
+H --> CU08
+H --> CU10
+H --> CU14
+H --> CU16
+H --> CU18
+H --> CU20
+H --> CU21
+H --> CU24
+H --> CU27
+H --> CU28
+H --> CU29
+
+CU13 <-- S
+CU23 <-- S
+CU25 <-- S
+CU26 <-- S
+
+CU09 ..> CU26 : <<include>>
+CU20 ..> CU26 : <<include>>
+CU25 ..> CU26 : <<include>>
+CU21 ..> CU20 : <<extend>>
+@enduml
