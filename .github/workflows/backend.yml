@@ -1,0 +1,35 @@
+# Compila el backend y pasa todas sus pruebas (con PostgreSQL 16 en Testcontainers)
+# en cada push y en cada pull request que toque el backend o el diseño.
+name: Backend
+
+on:
+  push:
+    branches: [main]
+    paths: ['backend/**', 'docs/diseno/**', '.github/workflows/backend.yml']
+  pull_request:
+    paths: ['backend/**', 'docs/diseno/**', '.github/workflows/backend.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  pruebas:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Compilar y probar
+        run: ./mvnw -B verify
+      - name: Guardar informes de pruebas
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: informes-pruebas
+          path: backend/target/surefire-reports/
