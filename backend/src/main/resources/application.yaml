@@ -1,0 +1,50 @@
+spring:
+  application:
+    name: tfg-backend
+  # Si no se arranca con Docker Compose, se usa esta base de datos (variables de entorno en producción).
+  datasource:
+    url: ${BD_URL:jdbc:postgresql://localhost:5432/tfg}
+    username: ${BD_USUARIO:tfg}
+    password: ${BD_CONTRASENA:tfg}
+  jpa:
+    open-in-view: false
+    hibernate:
+      # El esquema lo crea Flyway; Hibernate solo comprueba que las entidades coinciden con él.
+      ddl-auto: validate
+  flyway:
+    locations: classpath:db/migration
+  jackson:
+    # Los campos nulos no se envían (p. ej. la etapa de un adulto).
+    default-property-inclusion: non_null
+  mvc:
+    problemdetails:
+      enabled: true
+  docker:
+    compose:
+      lifecycle-management: start-only
+
+app:
+  seguridad:
+    # Clave HMAC de los JWT, en Base64 (32 bytes o más). La de desarrollo es pública:
+    # en producción se pasa con la variable de entorno JWT_SECRETO.
+    jwt-secreto: ${JWT_SECRETO:ZGVzYXJyb2xsby1zb2xvLW5vLXVzYXItZW4tcHJvZHVjY2lvbi0xMjM0NTY3ODkw}
+    duracion-token-acceso: 15m
+    duracion-codigo-vinculacion: 10m
+    duracion-codigo-invitacion: 48h
+    intentos-pin: 5
+    bloqueo-pin: 15m
+
+springdoc:
+  # Documentación en http://localhost:8080/swagger-ui.html. En producción: SPRINGDOC_ENABLED=false
+  api-docs:
+    enabled: ${SPRINGDOC_ENABLED:true}
+    path: /v3/api-docs
+  swagger-ui:
+    enabled: ${SPRINGDOC_ENABLED:true}
+    path: /swagger-ui.html
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
