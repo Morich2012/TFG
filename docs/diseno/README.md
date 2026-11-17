@@ -2,8 +2,8 @@
 
 Borradores de las tareas T3 (análisis) y T4 (diseño) en formato revisable en el repositorio. Los textos
 largos del análisis y del diseño están en los documentos de trabajo
-([análisis](https://claude.ai/artifact/HSPzCVVJpDacbcAipTeD48) y
-[diseño](https://claude.ai/artifact/EsiSaFE7YJrWnT6BkFJatm)); aquí está lo que el backend y la app
+(análisis y
+diseño); aquí está lo que el backend y la app
 usarán directamente.
 
 | Fichero | Qué es | Capítulo de la memoria |

@@ -1,7 +1,7 @@
 # Modelo de datos
 
 Borrador de la tarea T4 (capítulo 4.2 de la memoria). Concreta la sección 3 del
-[diseño](https://claude.ai/artifact/EsiSaFE7YJrWnT6BkFJatm): las tablas del núcleo y de los módulos del
+diseño: las tablas del núcleo y de los módulos del
 MVP con sus columnas, restricciones y datos iniciales. El esquema completo está en
 [`esquema.sql`](esquema.sql) y se ha probado sobre PostgreSQL 16 con
 [`pruebas/prueba-libro.sql`](pruebas/prueba-libro.sql).

@@ -1,7 +1,7 @@
 # Casos de uso
 
 Borrador de la tarea T3 (capítulo 3.4 de la memoria). Parte del
-[análisis](https://claude.ai/artifact/HSPzCVVJpDacbcAipTeD48) y cubre el MVP: núcleo, tareas, tienda,
+análisis y cubre el MVP: núcleo, tareas, tienda,
 ahorro, paga, presupuesto, progreso y evaluación. Los módulos posteriores (préstamos, Estado familiar,
 clan, Aprende, personalización) tienen sus casos de uso resumidos al final.
 

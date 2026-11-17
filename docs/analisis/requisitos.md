@@ -1,7 +1,7 @@
 # Requisitos y trazabilidad
 
 Borrador de la tarea T3 (capítulo 3.3 de la memoria). Los textos de los requisitos son los del
-[análisis](https://claude.ai/artifact/HSPzCVVJpDacbcAipTeD48); lo nuevo aquí es la **matriz de
+análisis; lo nuevo aquí es la **matriz de
 trazabilidad**, que enlaza cada requisito con su caso de uso ([casos-de-uso.md](casos-de-uso.md)), sus
 operaciones de la [API](../diseno/api/openapi.yaml) y sus tablas del
 [modelo de datos](../diseno/modelo-datos.md). Al implementar se añadirá una columna con las pruebas.
