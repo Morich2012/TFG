@@ -1,0 +1,17 @@
+# PostgreSQL 16 para desarrollo local. Spring Boot lo arranca solo con
+# ./mvnw spring-boot:run (soporte de Docker Compose), o a mano con:
+#   docker compose up -d
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: tfg
+      POSTGRES_USER: tfg
+      POSTGRES_PASSWORD: tfg
+    ports:
+      - "5432:5432"
+    volumes:
+      - tfg-datos:/var/lib/postgresql/data
+
+volumes:
+  tfg-datos:
