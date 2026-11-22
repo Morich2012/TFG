@@ -106,11 +106,12 @@ siguiendo las guías de [Microsoft](https://learn.microsoft.com/en-us/azure/arch
 - **Iniciar sesión es crear una sesión.** Las cuatro formas de entrar comparten `POST /sesiones` y se
   distinguen por `tipo`, igual que los *grant types* de OAuth 2.0 (RFC 6749) en un único endpoint de token.
 - **La familia va en la ruta y se comprueba contra el token.** Si `{familiaId}` no es la familia del token,
-  la respuesta es 404.
+  la respuesta es 404. Lo hace un único interceptor, `seguridad/ComprobadorFamilia`, antes de cualquier
+  controlador, así que ninguna ruta nueva puede olvidarlo.
 - **`POST` que crea responde 201 con cabecera `Location`.**
 
-La justificación completa, con las reglas concretas de cada guía, está en la descripción de
-[`openapi.yaml`](../docs/diseno/api/openapi.yaml) («Reglas comunes»).
+La justificación completa, con la regla concreta de cada guía y la tabla de rutas antes y ahora, está en
+[`docs/diseno/api/diseno-rest.md`](../docs/diseno/api/diseno-rest.md).
 
 ## Decisiones de la iteración 1
 

@@ -15,6 +15,7 @@ usarán directamente.
 | [`esquema.sql`](esquema.sql) | Esquema de PostgreSQL 16 con restricciones, disparadores y datos iniciales | 4.2 |
 | [`pruebas/prueba-libro.sql`](pruebas/prueba-libro.sql) | Prueba de las reglas del dinero sobre el esquema | 4.2 y 7.1 |
 | [`api/openapi.yaml`](api/openapi.yaml) | Contrato de la API REST (OpenAPI 3.1, 70 operaciones) | 4.3 |
+| [`api/diseno-rest.md`](api/diseno-rest.md) | Reglas de diseño de las rutas con sus fuentes, y tabla de rutas antes y ahora | 4.3 |
 
 ## Cómo verlo y comprobarlo
 

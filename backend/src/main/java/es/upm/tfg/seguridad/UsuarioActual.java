@@ -24,8 +24,9 @@ public record UsuarioActual(long miembroId, long familiaId, Rol rol, long dispos
     }
 
     /**
-     * Para las rutas {@code /familias/{familiaId}/...}: si la familia de la ruta no es la del
-     * token responde 404, no 403, para no revelar que existe (RNF-03).
+     * Para las rutas {@code /familias/{familiaId}/...}. {@link ComprobadorFamilia} ya rechaza
+     * antes una familia ajena; esta segunda comprobación deja el servicio seguro aunque se llame
+     * desde otro sitio. Responde 404, no 403, para no revelar que la familia existe (RNF-03).
      */
     public static UsuarioActual de(Jwt jwt, long familiaId) {
         UsuarioActual u = de(jwt);
