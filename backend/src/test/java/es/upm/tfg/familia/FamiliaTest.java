@@ -25,15 +25,15 @@ class FamiliaTest extends PruebaIntegracion {
     @Test
     void unAdultoCambiaElNombreDeLaMonedaYElTipoDeCambio() throws Exception {
         Sesion s = registrarFamilia();
-        mvc.perform(con(s, json(patch("/api/v1/familia"), "{\"nombreMoneda\":\"bellotas\",\"monedasPorEuro\":20}")))
+        mvc.perform(con(s, json(patch(fam(s)), "{\"nombreMoneda\":\"bellotas\",\"monedasPorEuro\":20}")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.nombre").value("Familia de prueba"))
                 .andExpect(jsonPath("$.nombreMoneda").value("bellotas"))
                 .andExpect(jsonPath("$.monedasPorEuro").value(20));
 
-        mvc.perform(con(s, json(patch("/api/v1/familia"), "{}")))
+        mvc.perform(con(s, json(patch(fam(s)), "{}")))
                 .andExpect(status().isBadRequest());
-        mvc.perform(con(s, json(patch("/api/v1/familia"), "{\"monedasPorEuro\":0}")))
+        mvc.perform(con(s, json(patch(fam(s)), "{\"monedasPorEuro\":0}")))
                 .andExpect(status().isBadRequest());
     }
 
@@ -42,7 +42,7 @@ class FamiliaTest extends PruebaIntegracion {
         Sesion s = registrarFamilia();
         long hijo = altaHijo(s, "Lucía", 2018, "4321");
 
-        mvc.perform(con(s, get("/api/v1/familia/miembros")))
+        mvc.perform(con(s, get(fam(s) + "/miembros")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(2)))
                 .andExpect(jsonPath("$[1].nombre").value("Lucía"))
@@ -63,10 +63,36 @@ class FamiliaTest extends PruebaIntegracion {
     @Test
     void elAltaSinConsentimientoSeRechaza() throws Exception {
         Sesion s = registrarFamilia();
-        mvc.perform(con(s, json(post("/api/v1/familia/miembros"),
+        mvc.perform(con(s, json(post(fam(s) + "/miembros"),
                 "{\"nombre\":\"Lucía\",\"avatar\":\"avatar-2\",\"consentimiento\":false}")))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errores[0].campo").value("consentimiento"));
+    }
+
+    @Test
+    void laRutaDeOtraFamiliaRespondeNoEncontrado() throws Exception {
+        Sesion familiaA = registrarFamilia();
+        Sesion familiaB = registrarFamilia();
+        mvc.perform(con(familiaA, get(fam(familiaB))))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.codigo").value("NO_ENCONTRADO"));
+        mvc.perform(con(familiaA, get(fam(familiaB) + "/miembros"))).andExpect(status().isNotFound());
+        mvc.perform(con(familiaA, json(post(fam(familiaB) + "/miembros"),
+                "{\"nombre\":\"Intruso\",\"avatar\":\"a\",\"consentimiento\":true}")))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void elAltaDevuelveLaUbicacionDelNuevoMiembro() throws Exception {
+        Sesion s = registrarFamilia();
+        String ubicacion = mvc.perform(con(s, json(post(fam(s) + "/miembros"),
+                "{\"nombre\":\"Lucía\",\"avatar\":\"avatar-2\",\"consentimiento\":true}")))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getHeader("Location");
+        assertThat(ubicacion).startsWith(fam(s) + "/miembros/");
+        mvc.perform(con(s, get(ubicacion)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.nombre").value("Lucía"));
     }
 
     @Test
@@ -75,12 +101,12 @@ class FamiliaTest extends PruebaIntegracion {
         Sesion familiaB = registrarFamilia();
         long hijoDeB = altaHijo(familiaB, "Hugo", 2014, null);
 
-        mvc.perform(con(familiaA, json(patch("/api/v1/familia/miembros/{id}", hijoDeB), "{\"nombre\":\"X\"}")))
+        mvc.perform(con(familiaA, json(patch(fam(familiaA) + "/miembros/{id}", hijoDeB), "{\"nombre\":\"X\"}")))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.codigo").value("NO_ENCONTRADO"));
-        mvc.perform(con(familiaA, post("/api/v1/familia/miembros/{id}/codigo-vinculacion", hijoDeB)))
+        mvc.perform(con(familiaA, post(fam(familiaA) + "/miembros/{id}/codigos-vinculacion", hijoDeB)))
                 .andExpect(status().isNotFound());
-        mvc.perform(con(familiaA, get("/api/v1/familia/miembros/{id}/dispositivos", hijoDeB)))
+        mvc.perform(con(familiaA, get(fam(familiaA) + "/miembros/{id}/dispositivos", hijoDeB)))
                 .andExpect(status().isNotFound());
     }
 
@@ -89,21 +115,21 @@ class FamiliaTest extends PruebaIntegracion {
         Sesion admin = registrarFamilia();
         long hijo = altaHijo(admin, "Lucía", 2017, null);
 
-        mvc.perform(con(admin, json(patch("/api/v1/familia/miembros/{id}", hijo),
+        mvc.perform(con(admin, json(patch(fam(admin) + "/miembros/{id}", hijo),
                 "{\"nombre\":\"Lu\",\"anioNacimiento\":2016,\"pin\":\"9876\"}")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.nombre").value("Lu"))
                 .andExpect(jsonPath("$.anioNacimiento").value(2016));
 
         // El PIN y el año son solo para hijos.
-        mvc.perform(con(admin, json(patch("/api/v1/familia/miembros/{id}", admin.miembroId()), "{\"pin\":\"1234\"}")))
+        mvc.perform(con(admin, json(patch(fam(admin) + "/miembros/{id}", admin.miembroId()), "{\"pin\":\"1234\"}")))
                 .andExpect(status().isBadRequest());
 
         // Un adulto que no es administrador no puede editar al administrador.
         Sesion papa = unirseComoAdulto(admin);
-        mvc.perform(con(papa, json(patch("/api/v1/familia/miembros/{id}", admin.miembroId()), "{\"nombre\":\"X\"}")))
+        mvc.perform(con(papa, json(patch(fam(papa) + "/miembros/{id}", admin.miembroId()), "{\"nombre\":\"X\"}")))
                 .andExpect(status().isForbidden());
-        mvc.perform(con(papa, json(patch("/api/v1/familia/miembros/{id}", papa.miembroId()), "{\"nombre\":\"Papá\"}")))
+        mvc.perform(con(papa, json(patch(fam(papa) + "/miembros/{id}", papa.miembroId()), "{\"nombre\":\"Papá\"}")))
                 .andExpect(status().isOk());
     }
 
@@ -113,16 +139,16 @@ class FamiliaTest extends PruebaIntegracion {
         long hijo = altaHijo(admin, "Lucía", 2017, "1234");
         Sesion movilHijo = vincularHijo(admin, hijo);
 
-        mvc.perform(con(admin, delete("/api/v1/familia/miembros/{id}", hijo))).andExpect(status().isNoContent());
+        mvc.perform(con(admin, delete(fam(admin) + "/miembros/{id}", hijo))).andExpect(status().isNoContent());
 
-        mvc.perform(con(admin, get("/api/v1/familia/miembros"))).andExpect(jsonPath("$", hasSize(1)));
-        mvc.perform(json(post("/api/v1/auth/refrescar"), "{\"tokenRefresco\":\"%s\"}".formatted(movilHijo.tokenRefresco())))
+        mvc.perform(con(admin, get(fam(admin) + "/miembros"))).andExpect(jsonPath("$", hasSize(1)));
+        mvc.perform(json(post("/api/v1/sesiones"), "{\"tipo\":\"TOKEN_REFRESCO\",\"tokenRefresco\":\"%s\"}".formatted(movilHijo.tokenRefresco())))
                 .andExpect(status().isUnauthorized());
         String datos = jdbc.sql("SELECT nombre || '|' || coalesce(anio_nacimiento::text, '-') || '|' "
                 + "|| coalesce(hash_pin, '-') FROM miembro WHERE id = ?").param(hijo).query(String.class).single();
         assertThat(datos).isEqualTo("Miembro dado de baja|-|-");
 
-        mvc.perform(con(admin, delete("/api/v1/familia/miembros/{id}", hijo))).andExpect(status().isNotFound());
+        mvc.perform(con(admin, delete(fam(admin) + "/miembros/{id}", hijo))).andExpect(status().isNotFound());
     }
 
     @Test
@@ -131,14 +157,14 @@ class FamiliaTest extends PruebaIntegracion {
         Sesion papa = unirseComoAdulto(admin);
         long hijo = altaHijo(admin, "Lucía", 2017, null);
 
-        mvc.perform(con(papa, delete("/api/v1/familia/miembros/{id}", hijo))).andExpect(status().isForbidden());
-        mvc.perform(con(admin, delete("/api/v1/familia/miembros/{id}", admin.miembroId())))
+        mvc.perform(con(papa, delete(fam(papa) + "/miembros/{id}", hijo))).andExpect(status().isForbidden());
+        mvc.perform(con(admin, delete(fam(admin) + "/miembros/{id}", admin.miembroId())))
                 .andExpect(status().isForbidden());
 
         // Un adulto dado de baja ya no puede entrar.
-        mvc.perform(con(admin, delete("/api/v1/familia/miembros/{id}", papa.miembroId())))
+        mvc.perform(con(admin, delete(fam(admin) + "/miembros/{id}", papa.miembroId())))
                 .andExpect(status().isNoContent());
-        mvc.perform(json(post("/api/v1/auth/refrescar"), "{\"tokenRefresco\":\"%s\"}".formatted(papa.tokenRefresco())))
+        mvc.perform(json(post("/api/v1/sesiones"), "{\"tipo\":\"TOKEN_REFRESCO\",\"tokenRefresco\":\"%s\"}".formatted(papa.tokenRefresco())))
                 .andExpect(status().isUnauthorized());
     }
 
@@ -148,23 +174,23 @@ class FamiliaTest extends PruebaIntegracion {
         long hijo = altaHijo(admin, "Lucía", 2017, null);
         Sesion movil = vincularHijo(admin, hijo);
         long dispositivo = ((Number) JsonPath.read(mvc.perform(con(admin,
-                get("/api/v1/familia/miembros/{id}/dispositivos", hijo)))
+                get(fam(admin) + "/miembros/{id}/dispositivos", hijo)))
                 .andReturn().getResponse().getContentAsString(), "$[0].id")).longValue();
 
         // Otra familia no puede tocarlo.
         Sesion otra = registrarFamilia();
-        mvc.perform(con(otra, delete("/api/v1/dispositivos/{id}", dispositivo))).andExpect(status().isNotFound());
+        mvc.perform(con(otra, delete(fam(otra) + "/miembros/{m}/dispositivos/{id}", hijo, dispositivo))).andExpect(status().isNotFound());
 
-        mvc.perform(con(admin, delete("/api/v1/dispositivos/{id}", dispositivo))).andExpect(status().isNoContent());
-        mvc.perform(json(post("/api/v1/auth/refrescar"), "{\"tokenRefresco\":\"%s\"}".formatted(movil.tokenRefresco())))
+        mvc.perform(con(admin, delete(fam(admin) + "/miembros/{m}/dispositivos/{id}", hijo, dispositivo))).andExpect(status().isNoContent());
+        mvc.perform(json(post("/api/v1/sesiones"), "{\"tipo\":\"TOKEN_REFRESCO\",\"tokenRefresco\":\"%s\"}".formatted(movil.tokenRefresco())))
                 .andExpect(status().isUnauthorized());
     }
 
     private Sesion unirseComoAdulto(Sesion admin) throws Exception {
-        String codigo = JsonPath.read(mvc.perform(con(admin, post("/api/v1/familia/invitaciones")))
+        String codigo = JsonPath.read(mvc.perform(con(admin, post(fam(admin) + "/invitaciones")))
                 .andReturn().getResponse().getContentAsString(), "$.codigo");
-        return Sesion.de(mvc.perform(json(post("/api/v1/auth/unirse"), """
-                {"codigo":"%s","nombre":"Papá","email":"%s","contrasena":"contrasena-segura",
+        return Sesion.de(mvc.perform(json(post("/api/v1/sesiones"), """
+                {"tipo":"CODIGO_INVITACION","codigo":"%s","nombre":"Papá","email":"%s","contrasena":"contrasena-segura",
                  "aceptaPrivacidad":true}""".formatted(codigo, correoNuevo())))
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString());

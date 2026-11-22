@@ -14,7 +14,7 @@ usarán directamente.
 | [`modelo-datos.md`](modelo-datos.md) | Diagrama entidad-relación, libro contable y reglas de cálculo | 4.2 |
 | [`esquema.sql`](esquema.sql) | Esquema de PostgreSQL 16 con restricciones, disparadores y datos iniciales | 4.2 |
 | [`pruebas/prueba-libro.sql`](pruebas/prueba-libro.sql) | Prueba de las reglas del dinero sobre el esquema | 4.2 y 7.1 |
-| [`api/openapi.yaml`](api/openapi.yaml) | Contrato de la API REST (OpenAPI 3.1, 72 operaciones) | 4.3 |
+| [`api/openapi.yaml`](api/openapi.yaml) | Contrato de la API REST (OpenAPI 3.1, 70 operaciones) | 4.3 |
 
 ## Cómo verlo y comprobarlo
 

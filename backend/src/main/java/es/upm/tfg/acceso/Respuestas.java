@@ -4,13 +4,17 @@ import java.time.Instant;
 
 import es.upm.tfg.familia.MiembroDto;
 
-/** Cuerpos de las respuestas de acceso (esquemas Sesion, CodigoAcceso y Dispositivo). */
+/** Cuerpos de las respuestas de acceso (esquemas Sesion, SesionActual, CodigoAcceso y Dispositivo). */
 public final class Respuestas {
 
     private Respuestas() {
     }
 
-    public record Sesion(String tokenAcceso, String tokenRefresco, Instant expiraEn, MiembroDto miembro) {
+    public record Sesion(String tokenAcceso, String tokenRefresco, Instant expiraEn, long familiaId,
+            MiembroDto miembro) {
+    }
+
+    public record SesionActual(long familiaId, MiembroDto miembro) {
     }
 
     public record CodigoAccesoDto(String codigo, Instant expiraEn, String contenidoQr) {

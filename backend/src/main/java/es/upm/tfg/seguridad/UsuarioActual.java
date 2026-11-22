@@ -2,6 +2,7 @@ package es.upm.tfg.seguridad;
 
 import org.springframework.security.oauth2.jwt.Jwt;
 
+import es.upm.tfg.comun.ErrorApi;
 import es.upm.tfg.familia.Rol;
 
 /**
@@ -20,6 +21,18 @@ public record UsuarioActual(long miembroId, long familiaId, Rol rol, long dispos
                 ((Number) jwt.getClaim(CLAIM_FAMILIA)).longValue(),
                 Rol.valueOf(jwt.getClaimAsString(CLAIM_ROL)),
                 ((Number) jwt.getClaim(CLAIM_DISPOSITIVO)).longValue());
+    }
+
+    /**
+     * Para las rutas {@code /familias/{familiaId}/...}: si la familia de la ruta no es la del
+     * token responde 404, no 403, para no revelar que existe (RNF-03).
+     */
+    public static UsuarioActual de(Jwt jwt, long familiaId) {
+        UsuarioActual u = de(jwt);
+        if (u.familiaId() != familiaId) {
+            throw ErrorApi.noEncontrado();
+        }
+        return u;
     }
 
     public boolean esAdulto() {

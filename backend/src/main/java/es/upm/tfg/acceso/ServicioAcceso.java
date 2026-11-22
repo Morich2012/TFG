@@ -11,14 +11,16 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import es.upm.tfg.acceso.Peticiones.LoginPeticion;
-import es.upm.tfg.acceso.Peticiones.RefrescarPeticion;
 import es.upm.tfg.acceso.Peticiones.RegistroPeticion;
-import es.upm.tfg.acceso.Peticiones.UnirsePeticion;
-import es.upm.tfg.acceso.Peticiones.VincularPeticion;
+import es.upm.tfg.acceso.Peticiones.SesionConCodigoInvitacion;
+import es.upm.tfg.acceso.Peticiones.SesionConCodigoVinculacion;
+import es.upm.tfg.acceso.Peticiones.SesionConContrasena;
+import es.upm.tfg.acceso.Peticiones.SesionConTokenRefresco;
+import es.upm.tfg.acceso.Peticiones.SesionPeticion;
 import es.upm.tfg.acceso.Respuestas.CodigoAccesoDto;
 import es.upm.tfg.acceso.Respuestas.DispositivoDto;
 import es.upm.tfg.acceso.Respuestas.Sesion;
+import es.upm.tfg.acceso.Respuestas.SesionActual;
 import es.upm.tfg.comun.CodigoError;
 import es.upm.tfg.comun.ErrorApi;
 import es.upm.tfg.comun.Secretos;
@@ -81,7 +83,23 @@ public class ServicioAcceso {
         return abrirSesion(admin, DISPOSITIVO_POR_DEFECTO);
     }
 
-    public Sesion iniciarSesion(LoginPeticion p) {
+    /** {@code POST /sesiones}: elige el caso según el tipo de la petición. */
+    public Sesion crearSesion(SesionPeticion p) {
+        return switch (p) {
+            case SesionConContrasena c -> iniciarSesion(c);
+            case SesionConTokenRefresco r -> refrescar(r);
+            case SesionConCodigoVinculacion v -> vincular(v);
+            case SesionConCodigoInvitacion i -> unirse(i);
+        };
+    }
+
+    @Transactional(readOnly = true)
+    public SesionActual sesionActual(UsuarioActual u) {
+        Miembro m = familias.miembroDeLaFamilia(u, u.miembroId());
+        return new SesionActual(m.getFamiliaId(), familias.dto(m));
+    }
+
+    private Sesion iniciarSesion(SesionConContrasena p) {
         Miembro m = miembros.findByEmail(normalizar(p.email())).orElse(null);
         boolean correcta = codificador.matches(p.contrasena(), m == null ? hashFicticio : m.getHashContrasena());
         if (m == null || !correcta || !m.estaActivo()) {
@@ -91,7 +109,7 @@ public class ServicioAcceso {
     }
 
     /** RF-04: el móvil del hijo canjea el código del QR por una sesión. */
-    public Sesion vincular(VincularPeticion p) {
+    private Sesion vincular(SesionConCodigoVinculacion p) {
         CodigoAcceso codigo = canjear(p.codigo(), TipoCodigo.VINCULACION);
         Miembro hijo = miembros.findByIdAndFamiliaIdAndDadoDeBajaEnIsNull(codigo.getMiembroId(), codigo.getFamiliaId())
                 .orElseThrow(() -> new ErrorApi(CodigoError.CODIGO_CADUCADO));
@@ -99,7 +117,7 @@ public class ServicioAcceso {
     }
 
     /** RF-02: un segundo adulto se une a la familia con el código de invitación. */
-    public Sesion unirse(UnirsePeticion p) {
+    private Sesion unirse(SesionConCodigoInvitacion p) {
         String email = normalizar(p.email());
         comprobarCorreoLibre(email);
         CodigoAcceso codigo = canjear(p.codigo(), TipoCodigo.INVITACION);
@@ -112,7 +130,7 @@ public class ServicioAcceso {
      * Cambia el token de refresco por uno nuevo y un JWT nuevo. Si el hijo entra con PIN en vez de
      * huella, la app lo envía y se comprueba con límite de intentos.
      */
-    public Sesion refrescar(RefrescarPeticion p) {
+    private Sesion refrescar(SesionConTokenRefresco p) {
         Dispositivo d = dispositivos.findByHashTokenRefresco(Secretos.sha256(p.tokenRefresco()))
                 .filter(Dispositivo::estaActivo)
                 .orElseThrow(() -> new ErrorApi(CodigoError.NO_AUTENTICADO, "La sesión ha caducado"));
@@ -158,11 +176,13 @@ public class ServicioAcceso {
                 .toList();
     }
 
-    /** Desvincula un dispositivo (un móvil perdido). Debe ser de un miembro de la familia. */
-    public void revocarDispositivo(UsuarioActual u, long dispositivoId) {
-        Dispositivo d = dispositivos.findById(dispositivoId).filter(Dispositivo::estaActivo)
+    /** Desvincula un dispositivo (un móvil perdido) de un miembro de la familia. */
+    public void revocarDispositivo(UsuarioActual u, long miembroId, long dispositivoId) {
+        Miembro m = familias.miembroDeLaFamilia(u, miembroId); // 404 si es de otra familia
+        Dispositivo d = dispositivos.findById(dispositivoId)
+                .filter(Dispositivo::estaActivo)
+                .filter(x -> x.getMiembroId().equals(m.getId()))
                 .orElseThrow(ErrorApi::noEncontrado);
-        familias.miembroDeLaFamilia(u, d.getMiembroId()); // 404 si es de otra familia
         d.revocar();
     }
 
@@ -185,7 +205,7 @@ public class ServicioAcceso {
 
     private Sesion sesion(Miembro m, Dispositivo d, String tokenRefresco) {
         ServicioTokens.TokenAcceso acceso = tokens.emitir(m, d.getId());
-        return new Sesion(acceso.valor(), tokenRefresco, acceso.expiraEn(), familias.dto(m));
+        return new Sesion(acceso.valor(), tokenRefresco, acceso.expiraEn(), m.getFamiliaId(), familias.dto(m));
     }
 
     private void comprobarPin(Dispositivo d, Miembro m, String pin) {
@@ -212,8 +232,8 @@ public class ServicioAcceso {
         String texto = Secretos.codigoLegible();
         Instant expira = reloj.instant().plus(duracion);
         codigos.save(new CodigoAcceso(u.familiaId(), tipo, miembroId, Secretos.hashCodigo(texto), u.miembroId(), expira));
-        String accion = tipo == TipoCodigo.VINCULACION ? "vincular" : "unirse";
-        return new CodigoAccesoDto(texto, expira, "tfgfamilia://" + accion + "?codigo=" + texto);
+        String tipoSesion = tipo == TipoCodigo.VINCULACION ? "CODIGO_VINCULACION" : "CODIGO_INVITACION";
+        return new CodigoAccesoDto(texto, expira, "tfgfamilia://sesion?tipo=" + tipoSesion + "&codigo=" + texto);
     }
 
     private void comprobarCorreoLibre(String email) {

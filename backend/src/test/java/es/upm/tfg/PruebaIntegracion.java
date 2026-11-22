@@ -26,12 +26,18 @@ public abstract class PruebaIntegracion {
     protected MockMvc mvc;
 
     /** Datos de una sesión devuelta por la API. */
-    protected record Sesion(String tokenAcceso, String tokenRefresco, long miembroId) {
+    protected record Sesion(String tokenAcceso, String tokenRefresco, long familiaId, long miembroId) {
 
         public static Sesion de(String json) {
             return new Sesion(JsonPath.read(json, "$.tokenAcceso"), JsonPath.read(json, "$.tokenRefresco"),
+                    ((Number) JsonPath.read(json, "$.familiaId")).longValue(),
                     ((Number) JsonPath.read(json, "$.miembro.id")).longValue());
         }
+    }
+
+    /** Ruta de la familia de la sesión: {@code /api/v1/familias/{familiaId}}. */
+    protected static String fam(Sesion s) {
+        return "/api/v1/familias/" + s.familiaId();
     }
 
     protected static String correoNuevo() {
@@ -51,7 +57,7 @@ public abstract class PruebaIntegracion {
         String cuerpo = """
                 {"nombreFamilia":"Familia de prueba","nombre":"Mamá","email":"%s",
                  "contrasena":"%s","aceptaPrivacidad":true}""".formatted(email, contrasena);
-        String res = mvc.perform(json(post("/api/v1/auth/registro"), cuerpo))
+        String res = mvc.perform(json(post("/api/v1/familias"), cuerpo))
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString();
         return Sesion.de(res);
@@ -67,7 +73,7 @@ public abstract class PruebaIntegracion {
                 {"nombre":"%s","avatar":"avatar-3",%s%s"consentimiento":true}""".formatted(nombre,
                 anio == null ? "" : "\"anioNacimiento\":" + anio + ",",
                 pin == null ? "" : "\"pin\":\"" + pin + "\",");
-        String res = mvc.perform(con(adulto, json(post("/api/v1/familia/miembros"), cuerpo)))
+        String res = mvc.perform(con(adulto, json(post(fam(adulto) + "/miembros"), cuerpo)))
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString();
         return ((Number) JsonPath.read(res, "$.id")).longValue();
@@ -76,17 +82,17 @@ public abstract class PruebaIntegracion {
     /** Genera el código QR de un hijo y lo canjea como haría su móvil. */
     protected Sesion vincularHijo(Sesion adulto, long hijoId) throws Exception {
         String codigo = JsonPath.read(mvc.perform(con(adulto,
-                post("/api/v1/familia/miembros/{id}/codigo-vinculacion", hijoId)))
+                post(fam(adulto) + "/miembros/{id}/codigos-vinculacion", hijoId)))
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString(), "$.codigo");
-        String res = mvc.perform(json(post("/api/v1/auth/vincular"),
-                "{\"codigo\":\"%s\",\"nombreDispositivo\":\"Tablet\"}".formatted(codigo)))
+        String res = mvc.perform(json(post("/api/v1/sesiones"),
+                "{\"tipo\":\"CODIGO_VINCULACION\",\"codigo\":\"%s\",\"nombreDispositivo\":\"Tablet\"}".formatted(codigo)))
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString();
         return Sesion.de(res);
     }
 
     protected String familiaJson(Sesion s) throws Exception {
-        return mvc.perform(con(s, get("/api/v1/familia"))).andReturn().getResponse().getContentAsString();
+        return mvc.perform(con(s, get(fam(s)))).andReturn().getResponse().getContentAsString();
     }
 }
