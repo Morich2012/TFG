@@ -4,8 +4,8 @@ Spring Boot 4.1 (Java 21) + PostgreSQL 16. Implementa el contrato
 [`docs/diseno/api/openapi.yaml`](../docs/diseno/api/openapi.yaml) por iteraciones.
 
 **Iteración 1 (9-22 nov):** esqueleto, esquema núcleo con Flyway, CI, y familia, perfiles, inicio de sesión
-y roles. Hay 17 de las 72 operaciones del contrato: todas las de las etiquetas *Acceso* y *Familia* salvo
-`GET /familia/resumen`, que necesita tareas y compras (iteración 2).
+y roles. Hay 16 de las 70 operaciones del contrato: todas las de las etiquetas *Acceso* y *Familia* salvo
+`GET /familias/{familiaId}/resumen`, que necesita tareas y compras (iteración 2).
 
 ## Cómo ejecutarlo
 
@@ -29,12 +29,22 @@ queda en `http://localhost:8080/api/v1`.
 Prueba rápida con `curl`:
 
 ```bash
-curl -X POST localhost:8080/api/v1/auth/registro -H 'Content-Type: application/json' \
+# 1. Registrar la familia (crea la familia y su adulto administrador, y abre sesión)
+curl -i -X POST localhost:8080/api/v1/familias -H 'Content-Type: application/json' \
   -d '{"nombreFamilia":"Familia Morales","nombre":"Miguel","email":"miguel@example.org",
        "contrasena":"contrasena-segura","aceptaPrivacidad":true}'
-# copia tokenAcceso de la respuesta
-curl localhost:8080/api/v1/familia -H "Authorization: Bearer <tokenAcceso>"
+# 201 Created, cabecera Location: /api/v1/familias/1, y en el cuerpo tokenAcceso y familiaId
+
+# 2. Más tarde, iniciar sesión es crear una sesión
+curl -X POST localhost:8080/api/v1/sesiones -H 'Content-Type: application/json' \
+  -d '{"tipo":"CONTRASENA","email":"miguel@example.org","contrasena":"contrasena-segura"}'
+
+# 3. Usar la API con el token
+curl localhost:8080/api/v1/familias/1/miembros -H "Authorization: Bearer <tokenAcceso>"
 ```
+
+Si el puerto 5432 ya lo usa un PostgreSQL instalado en el equipo, arranca con otro puerto:
+`BD_PUERTO=5433 ./mvnw spring-boot:run` (en PowerShell: `$env:BD_PUERTO=5433; .\mvnw.cmd spring-boot:run`).
 
 Desde IntelliJ: abre la carpeta `backend` como proyecto Maven y ejecuta `TfgApplication` (con Docker
 abierto).
@@ -70,12 +80,38 @@ backend/
     ├── comun/                    errores RFC 9457 con «codigo», hashes, reloj, springdoc
     ├── seguridad/                Spring Security, emisión y validación del JWT, UsuarioActual
     ├── familia/                  familia, miembros, etapas  (ControladorFamilia)
-    ├── acceso/                   registro, login, refresco, QR, invitaciones, dispositivos
+    ├── acceso/                   registro, sesiones (contraseña, refresco, QR, invitación), dispositivos
     └── cuentas/                  apertura del banco y los monederos (movimientos en la iteración 2)
 ```
 
 Las migraciones crecen con las iteraciones: `V2__tareas.sql`, `V3__tienda.sql`... Una migración ya aplicada
 no se edita; los cambios van en una nueva.
+
+## Diseño de las rutas
+
+La API se organiza en recursos con sustantivos en plural, anidados como máximo colección/elemento/colección,
+siguiendo las guías de [Microsoft](https://learn.microsoft.com/en-us/azure/architecture/best-practices/api-design),
+[Zalando](https://opensource.zalando.com/restful-api-guidelines/) y [Google](https://google.aip.dev/122):
+
+| Recurso | Rutas |
+|---|---|
+| Familia (raíz) | `POST /familias` (registro), `GET/PATCH /familias/{familiaId}` |
+| Miembros | `GET/POST /familias/{familiaId}/miembros`, `GET/PATCH/DELETE /familias/{familiaId}/miembros/{miembroId}` |
+| Sesiones | `POST /sesiones` (login, refresco, QR o invitación según `tipo`), `GET/PATCH/DELETE /sesiones/actual` |
+| Datos de un miembro | `/familias/{familiaId}/miembros/{miembroId}/progreso`, `/paga`, `/presupuestos/{semana}`... |
+
+- **Sin verbos en la URL.** Una acción que se repite es un recurso nuevo en una subcolección
+  (`POST .../huchas/{huchaId}/aportaciones`, `POST .../asignaciones/{asignacionId}/revisiones`); un cambio
+  de estado que ocurre una vez es un subrecurso único que se fija con `PUT` (`PUT .../compras/{compraId}/entrega`).
+- **Iniciar sesión es crear una sesión.** Las cuatro formas de entrar comparten `POST /sesiones` y se
+  distinguen por `tipo`, igual que los *grant types* de OAuth 2.0 (RFC 6749) en un único endpoint de token.
+- **La familia va en la ruta y se comprueba contra el token.** Si `{familiaId}` no es la familia del token,
+  la respuesta es 404. Lo hace un único interceptor, `seguridad/ComprobadorFamilia`, antes de cualquier
+  controlador, así que ninguna ruta nueva puede olvidarlo.
+- **`POST` que crea responde 201 con cabecera `Location`.**
+
+La justificación completa, con la regla concreta de cada guía y la tabla de rutas antes y ahora, está en
+[`docs/diseno/api/diseno-rest.md`](../docs/diseno/api/diseno-rest.md).
 
 ## Decisiones de la iteración 1
 

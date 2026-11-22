@@ -37,8 +37,8 @@ import tools.jackson.databind.json.JsonMapper;
  * Security la valida como servidor de recursos OAuth2.</li>
  * <li>El rol del token ({@code ADULTO_ADMIN}, {@code ADULTO}, {@code HIJO}) se convierte en la
  * autoridad {@code ROLE_<rol>} que comprueban las anotaciones {@code @PreAuthorize}.</li>
- * <li>Solo {@code /api/v1/auth/**} (salvo cerrar sesión), la salud y la documentación son
- * públicas.</li>
+ * <li>Solo el registro ({@code POST /familias}), crear sesión ({@code POST /sesiones}), la salud y
+ * la documentación son públicos.</li>
  * </ul>
  */
 @Configuration
@@ -51,8 +51,7 @@ public class ConfiguracionSeguridad {
             .csrf(csrf -> csrf.disable()) // API sin cookies: el token va en una cabecera
             .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers(HttpMethod.POST, "/api/v1/auth/cerrar-sesion").authenticated()
-                .requestMatchers("/api/v1/auth/**").permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/v1/familias", "/api/v1/sesiones").permitAll()
                 .requestMatchers("/actuator/health/**", "/v3/api-docs/**", "/swagger-ui/**",
                         "/swagger-ui.html", "/error").permitAll()
                 .anyRequest().authenticated())

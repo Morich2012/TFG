@@ -2,6 +2,7 @@ package es.upm.tfg.seguridad;
 
 import org.springframework.security.oauth2.jwt.Jwt;
 
+import es.upm.tfg.comun.ErrorApi;
 import es.upm.tfg.familia.Rol;
 
 /**
@@ -20,6 +21,19 @@ public record UsuarioActual(long miembroId, long familiaId, Rol rol, long dispos
                 ((Number) jwt.getClaim(CLAIM_FAMILIA)).longValue(),
                 Rol.valueOf(jwt.getClaimAsString(CLAIM_ROL)),
                 ((Number) jwt.getClaim(CLAIM_DISPOSITIVO)).longValue());
+    }
+
+    /**
+     * Para las rutas {@code /familias/{familiaId}/...}. {@link ComprobadorFamilia} ya rechaza
+     * antes una familia ajena; esta segunda comprobación deja el servicio seguro aunque se llame
+     * desde otro sitio. Responde 404, no 403, para no revelar que la familia existe (RNF-03).
+     */
+    public static UsuarioActual de(Jwt jwt, long familiaId) {
+        UsuarioActual u = de(jwt);
+        if (u.familiaId() != familiaId) {
+            throw ErrorApi.noEncontrado();
+        }
+        return u;
     }
 
     public boolean esAdulto() {

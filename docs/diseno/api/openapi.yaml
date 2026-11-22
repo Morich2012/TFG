@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: API de la economía familiar (TFG)
-  version: 0.1.0
+  version: 0.2.0
   summary: Contrato REST del backend Spring Boot para la app Android de educación financiera en familia.
   description: |
     Borrador de diseño (T4). Cubre el núcleo y los módulos del MVP: familia y acceso,
@@ -11,10 +11,27 @@ info:
     **Reglas comunes**
 
     * Todas las rutas cuelgan de `/api/v1` y usan JSON.
-    * Salvo las de `/auth`, todas exigen `Authorization: Bearer <JWT>`. El token lleva el
-      miembro, su familia y su rol (`ADULTO_ADMIN`, `ADULTO` o `HIJO`). Cada consulta se
-      filtra por la familia del token (RNF-03): un id de otra familia responde 404, no 403,
-      para no revelar que existe.
+    * **Diseño de las rutas.** Se siguen las guías REST de Microsoft (Azure Architecture
+      Center), Zalando y Google (AIP-122): recursos con nombres en plural, segmentos en
+      minúsculas con guiones, sin verbos en la URL y jerarquía `colección/{id}/subcolección`.
+      La familia es el recurso raíz: todo lo que pertenece a una familia cuelga de
+      `/familias/{familiaId}`, y lo que es de un miembro concreto (progreso, paga, presupuesto),
+      de `/familias/{familiaId}/miembros/{miembroId}`. Como máximo hay tres niveles de
+      subrecursos (Zalando, regla 147). Los recursos que solo existen dentro de otro (huchas,
+      tareas, compras...) no se anidan bajo el miembro, sino bajo la familia, con el miembro como
+      campo o filtro (`?hijoId=`), para no pasar de ese límite.
+    * **Operaciones que no son CRUD.** No se usan verbos (`/aprobar`, `/comprar`): cada acción se
+      modela como un recurso (Zalando, reglas 138 y 141). Lo que puede ocurrir varias veces es
+      una subcolección y se crea con `POST` (`/aportaciones`, `/entregas`, `/revisiones`); lo
+      que ocurre una sola vez es un subrecurso único y se fija con `PUT`, que es idempotente
+      (`/bloqueo`, `/entrega`, `/cancelacion`, `/correccion`).
+    * **Acceso.** Salvo `POST /familias` (registro) y `POST /sesiones` (iniciar o renovar
+      sesión), todas exigen `Authorization: Bearer <JWT>`. El token lleva el miembro, su familia
+      y su rol (`ADULTO_ADMIN`, `ADULTO` o `HIJO`). Si el `familiaId` de la ruta no es el del
+      token, o un id no pertenece a esa familia, responde 404 y no 403, para no revelar que
+      existe (RNF-03).
+    * Un `POST` que crea un recurso responde 201 con su representación y, si el recurso se puede
+      consultar, con la cabecera `Location`.
     * Las cantidades son enteros de monedas (RNF-07). Los euros van en céntimos.
     * Las operaciones que mueven dinero aceptan la cabecera `Idempotency-Key`. Si el móvil
       repite la petición con la misma clave, el servidor devuelve el resultado original y
@@ -56,12 +73,14 @@ security:
 
 paths:
   # ---------------------------------------------------------------- Acceso
-  /auth/registro:
+  /familias:
     post:
       tags: [Acceso]
-      operationId: registrarAdulto
+      operationId: registrarFamilia
       summary: Registra un adulto y crea su familia (RF-01)
-      description: Crea la familia, su cuenta BANCO y al adulto como `ADULTO_ADMIN`.
+      description: |
+        Crea la familia, su cuenta BANCO y al adulto como `ADULTO_ADMIN`, y abre su sesión.
+        Responde con la cabecera `Location: /api/v1/familias/{familiaId}`.
       security: []
       x-roles: [PUBLICO]
       requestBody:
@@ -82,127 +101,71 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problema' }
 
-  /auth/login:
+  /sesiones:
     post:
       tags: [Acceso]
-      operationId: iniciarSesion
-      summary: Inicio de sesión de un adulto
-      security: []
-      x-roles: [PUBLICO]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/LoginPeticion' }
-      responses:
-        '200':
-          description: Sesión iniciada
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Sesion' }
-        '401': { $ref: '#/components/responses/NoAutenticado' }
-
-  /auth/vincular:
-    post:
-      tags: [Acceso]
-      operationId: vincularDispositivo
-      summary: El dispositivo del hijo canjea el código QR por una sesión (RF-04)
+      operationId: crearSesion
+      summary: Inicia o renueva una sesión (RF-01, RF-02, RF-04)
       description: |
-        El código es de un solo uso y caduca a los 10 minutos. El hijo no necesita correo
-        ni contraseña. La app guarda el token de refresco cifrado con una clave del Android
-        Keystore que se desbloquea con la huella o con el PIN.
+        Una sesión es un dispositivo con su token de refresco y un token de acceso JWT de
+        15 minutos. El campo `tipo` dice cómo se obtiene, como los *grant types* del endpoint
+        de tokens de OAuth 2.0 (RFC 6749):
+
+        * `CONTRASENA`: un adulto entra con correo y contraseña.
+        * `TOKEN_REFRESCO`: se cambia el token de refresco por uno nuevo (se rota en cada uso).
+          Si el hijo entra con PIN en vez de huella, la app envía el PIN y se comprueba con
+          límite de intentos.
+        * `CODIGO_VINCULACION`: el móvil del hijo canjea el código del QR (un solo uso, 10 min).
+        * `CODIGO_INVITACION`: un segundo adulto canjea su invitación; se crea como `ADULTO` en
+          esa familia y se abre su sesión.
       security: []
       x-roles: [PUBLICO]
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/VincularPeticion' }
+            schema: { $ref: '#/components/schemas/SesionPeticion' }
       responses:
         '201':
-          description: Dispositivo vinculado
+          description: Sesión creada
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Sesion' }
         '400': { $ref: '#/components/responses/Invalida' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+        '409':
+          description: 'El correo ya está registrado (`codigo: CORREO_EN_USO`)'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problema' }
         '410':
           description: 'Código caducado o ya usado (`codigo: CODIGO_CADUCADO`)'
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problema' }
-
-  /auth/unirse:
-    post:
-      tags: [Acceso]
-      operationId: unirseAFamilia
-      summary: Un segundo adulto se une con un código de invitación (RF-02)
-      security: []
-      x-roles: [PUBLICO]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/UnirsePeticion' }
-      responses:
-        '201':
-          description: Adulto añadido a la familia como `ADULTO`
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Sesion' }
-        '409':
-          description: Correo en uso
-          content:
-            application/problem+json:
-              schema: { $ref: '#/components/schemas/Problema' }
-        '410':
-          description: Código caducado o ya usado
-          content:
-            application/problem+json:
-              schema: { $ref: '#/components/schemas/Problema' }
-
-  /auth/refrescar:
-    post:
-      tags: [Acceso]
-      operationId: refrescarSesion
-      summary: Obtiene un token de acceso nuevo con el token de refresco
-      description: |
-        El token de acceso dura 15 minutos y el de refresco se rota en cada uso. Si el hijo
-        entra con PIN en lugar de huella, la app envía el PIN y el servidor lo comprueba
-        (con límite de intentos).
-      security: []
-      x-roles: [PUBLICO]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/RefrescarPeticion' }
-      responses:
-        '200':
-          description: Tokens nuevos
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Sesion' }
-        '401': { $ref: '#/components/responses/NoAutenticado' }
         '429':
           description: 'Demasiados intentos de PIN (`codigo: DEMASIADOS_INTENTOS`)'
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problema' }
 
-  /auth/cerrar-sesion:
-    post:
+  /sesiones/actual:
+    get:
       tags: [Acceso]
-      operationId: cerrarSesion
-      summary: Revoca el token de refresco del dispositivo actual
+      operationId: obtenerSesionActual
+      summary: 'Quién soy: miembro y familia del token'
+      description: La app lo usa al abrirse para saber el `familiaId` con el que construir las rutas.
       x-roles: [ADULTO_ADMIN, ADULTO, HIJO]
       responses:
-        '204': { description: Sesión cerrada }
+        '200':
+          description: Sesión actual
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SesionActual' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
-
-  /dispositivos/actual/token-push:
-    put:
+    patch:
       tags: [Acceso]
-      operationId: guardarTokenPush
+      operationId: editarSesionActual
       summary: Guarda el token de Firebase Cloud Messaging del dispositivo (RF-28)
       x-roles: [ADULTO_ADMIN, ADULTO, HIJO]
       requestBody:
@@ -217,13 +180,23 @@ paths:
       responses:
         '204': { description: Guardado }
         '401': { $ref: '#/components/responses/NoAutenticado' }
+    delete:
+      tags: [Acceso]
+      operationId: cerrarSesion
+      summary: Cierra la sesión del dispositivo actual y revoca su token de refresco
+      x-roles: [ADULTO_ADMIN, ADULTO, HIJO]
+      responses:
+        '204': { description: Sesión cerrada }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
 
   # ---------------------------------------------------------------- Familia
-  /familia:
+  /familias/{familiaId}:
+    parameters:
+      - $ref: '#/components/parameters/FamiliaId'
     get:
       tags: [Familia]
       operationId: obtenerFamilia
-      summary: Datos de la familia del token
+      summary: Datos de la familia
       x-roles: [ADULTO_ADMIN, ADULTO, HIJO]
       responses:
         '200':
@@ -253,7 +226,9 @@ paths:
         '403': { $ref: '#/components/responses/Prohibido' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /familia/miembros:
+  /familias/{familiaId}/miembros:
+    parameters:
+      - $ref: '#/components/parameters/FamiliaId'
     get:
       tags: [Familia]
       operationId: listarMiembros
@@ -291,9 +266,23 @@ paths:
         '403': { $ref: '#/components/responses/Prohibido' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /familia/miembros/{miembroId}:
+  /familias/{familiaId}/miembros/{miembroId}:
     parameters:
+      - $ref: '#/components/parameters/FamiliaId'
       - $ref: '#/components/parameters/MiembroId'
+    get:
+      tags: [Familia]
+      operationId: obtenerMiembro
+      summary: Un miembro de la familia
+      x-roles: [ADULTO_ADMIN, ADULTO, HIJO]
+      responses:
+        '200':
+          description: Miembro
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Miembro' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
     patch:
       tags: [Familia]
       operationId: editarMiembro
@@ -328,8 +317,9 @@ paths:
         '404': { $ref: '#/components/responses/NoEncontrado' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /familia/miembros/{miembroId}/codigo-vinculacion:
+  /familias/{familiaId}/miembros/{miembroId}/codigos-vinculacion:
     parameters:
+      - $ref: '#/components/parameters/FamiliaId'
       - $ref: '#/components/parameters/MiembroId'
     post:
       tags: [Familia]
@@ -345,8 +335,9 @@ paths:
         '404': { $ref: '#/components/responses/NoEncontrado' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /familia/miembros/{miembroId}/dispositivos:
+  /familias/{familiaId}/miembros/{miembroId}/dispositivos:
     parameters:
+      - $ref: '#/components/parameters/FamiliaId'
       - $ref: '#/components/parameters/MiembroId'
     get:
       tags: [Familia]
@@ -363,8 +354,10 @@ paths:
                 items: { $ref: '#/components/schemas/Dispositivo' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /dispositivos/{dispositivoId}:
+  /familias/{familiaId}/miembros/{miembroId}/dispositivos/{dispositivoId}:
     parameters:
+      - $ref: '#/components/parameters/FamiliaId'
+      - $ref: '#/components/parameters/MiembroId'
       - name: dispositivoId
         in: path
         required: true
@@ -379,7 +372,9 @@ paths:
         '404': { $ref: '#/components/responses/NoEncontrado' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /familia/invitaciones:
+  /familias/{familiaId}/invitaciones:
+    parameters:
+      - $ref: '#/components/parameters/FamiliaId'
     post:
       tags: [Familia]
       operationId: invitarAdulto
@@ -393,7 +388,9 @@ paths:
               schema: { $ref: '#/components/schemas/CodigoAcceso' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /familia/resumen:
+  /familias/{familiaId}/resumen:
+    parameters:
+      - $ref: '#/components/parameters/FamiliaId'
     get:
       tags: [Familia]
       operationId: resumenFamilia
@@ -408,8 +405,9 @@ paths:
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
   # ---------------------------------------------------------------- Progreso
-  /miembros/{miembroId}/progreso:
+  /familias/{familiaId}/miembros/{miembroId}/progreso:
     parameters:
+      - $ref: '#/components/parameters/FamiliaId'
       - $ref: '#/components/parameters/MiembroId'
     get:
       tags: [Progreso]
@@ -425,8 +423,9 @@ paths:
         '404': { $ref: '#/components/responses/NoEncontrado' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /miembros/{miembroId}/experiencia:
+  /familias/{familiaId}/miembros/{miembroId}/eventos-experiencia:
     parameters:
+      - $ref: '#/components/parameters/FamiliaId'
       - $ref: '#/components/parameters/MiembroId'
     get:
       tags: [Progreso]
@@ -444,8 +443,9 @@ paths:
               schema: { $ref: '#/components/schemas/PaginaEventosExperiencia' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /miembros/{miembroId}/mecanicas:
+  /familias/{familiaId}/miembros/{miembroId}/mecanicas:
     parameters:
+      - $ref: '#/components/parameters/FamiliaId'
       - $ref: '#/components/parameters/MiembroId'
     get:
       tags: [Progreso]
@@ -465,8 +465,9 @@ paths:
                 items: { $ref: '#/components/schemas/MecanicaMiembro' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /miembros/{miembroId}/mecanicas/{codigo}:
+  /familias/{familiaId}/miembros/{miembroId}/mecanicas/{codigo}:
     parameters:
+      - $ref: '#/components/parameters/FamiliaId'
       - $ref: '#/components/parameters/MiembroId'
       - name: codigo
         in: path
@@ -498,8 +499,9 @@ paths:
         '404': { $ref: '#/components/responses/NoEncontrado' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /miembros/{miembroId}/etapa:
+  /familias/{familiaId}/miembros/{miembroId}/etapa:
     parameters:
+      - $ref: '#/components/parameters/FamiliaId'
       - $ref: '#/components/parameters/MiembroId'
     put:
       tags: [Progreso]
@@ -527,7 +529,9 @@ paths:
               schema: { $ref: '#/components/schemas/Progreso' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /familia/hitos:
+  /familias/{familiaId}/hitos:
+    parameters:
+      - $ref: '#/components/parameters/FamiliaId'
     get:
       tags: [Progreso]
       operationId: hitosFamilia
@@ -545,7 +549,9 @@ paths:
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
   # ---------------------------------------------------------------- Cuentas
-  /cuentas:
+  /familias/{familiaId}/cuentas:
+    parameters:
+      - $ref: '#/components/parameters/FamiliaId'
     get:
       tags: [Cuentas]
       operationId: listarCuentas
@@ -569,8 +575,9 @@ paths:
                 items: { $ref: '#/components/schemas/Cuenta' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /cuentas/{cuentaId}:
+  /familias/{familiaId}/cuentas/{cuentaId}:
     parameters:
+      - $ref: '#/components/parameters/FamiliaId'
       - $ref: '#/components/parameters/CuentaId'
     get:
       tags: [Cuentas]
@@ -586,8 +593,9 @@ paths:
         '404': { $ref: '#/components/responses/NoEncontrado' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /cuentas/{cuentaId}/movimientos:
+  /familias/{familiaId}/cuentas/{cuentaId}/movimientos:
     parameters:
+      - $ref: '#/components/parameters/FamiliaId'
       - $ref: '#/components/parameters/CuentaId'
     get:
       tags: [Cuentas]
@@ -615,7 +623,9 @@ paths:
         '404': { $ref: '#/components/responses/NoEncontrado' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /transferencias:
+  /familias/{familiaId}/transferencias:
+    parameters:
+      - $ref: '#/components/parameters/FamiliaId'
     post:
       tags: [Cuentas]
       operationId: transferir
@@ -639,7 +649,9 @@ paths:
         '409': { $ref: '#/components/responses/SaldoInsuficiente' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /ajustes:
+  /familias/{familiaId}/ajustes:
+    parameters:
+      - $ref: '#/components/parameters/FamiliaId'
     post:
       tags: [Cuentas]
       operationId: ajusteManual
@@ -661,13 +673,14 @@ paths:
         '409': { $ref: '#/components/responses/SaldoInsuficiente' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /movimientos/{movimientoId}/correccion:
+  /familias/{familiaId}/movimientos/{movimientoId}/correccion:
     parameters:
+      - $ref: '#/components/parameters/FamiliaId'
       - name: movimientoId
         in: path
         required: true
         schema: { $ref: '#/components/schemas/Id' }
-    post:
+    put:
       tags: [Cuentas]
       operationId: corregirMovimiento
       summary: Anula un movimiento con otro contrario enlazado (RNF-09)
@@ -696,7 +709,9 @@ paths:
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
   # ---------------------------------------------------------------- Huchas
-  /huchas:
+  /familias/{familiaId}/huchas:
+    parameters:
+      - $ref: '#/components/parameters/FamiliaId'
     post:
       tags: [Huchas]
       operationId: crearHucha
@@ -717,9 +732,10 @@ paths:
         '403': { $ref: '#/components/responses/Prohibido' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /huchas/{cuentaId}:
+  /familias/{familiaId}/huchas/{huchaId}:
     parameters:
-      - $ref: '#/components/parameters/CuentaId'
+      - $ref: '#/components/parameters/FamiliaId'
+      - $ref: '#/components/parameters/HuchaId'
     patch:
       tags: [Huchas]
       operationId: editarHucha
@@ -747,9 +763,10 @@ paths:
         '204': { description: Hucha cerrada }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /huchas/{cuentaId}/aportar:
+  /familias/{familiaId}/huchas/{huchaId}/aportaciones:
     parameters:
-      - $ref: '#/components/parameters/CuentaId'
+      - $ref: '#/components/parameters/FamiliaId'
+      - $ref: '#/components/parameters/HuchaId'
     post:
       tags: [Huchas]
       operationId: aportarHucha
@@ -771,9 +788,10 @@ paths:
         '409': { $ref: '#/components/responses/SaldoInsuficiente' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /huchas/{cuentaId}/retirar:
+  /familias/{familiaId}/huchas/{huchaId}/retiradas:
     parameters:
-      - $ref: '#/components/parameters/CuentaId'
+      - $ref: '#/components/parameters/FamiliaId'
+      - $ref: '#/components/parameters/HuchaId'
     post:
       tags: [Huchas]
       operationId: retirarHucha
@@ -805,10 +823,11 @@ paths:
               schema: { $ref: '#/components/schemas/Problema' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /huchas/{cuentaId}/bloquear:
+  /familias/{familiaId}/huchas/{huchaId}/bloqueo:
     parameters:
-      - $ref: '#/components/parameters/CuentaId'
-    post:
+      - $ref: '#/components/parameters/FamiliaId'
+      - $ref: '#/components/parameters/HuchaId'
+    put:
       tags: [Huchas]
       operationId: bloquearHucha
       summary: Bloquea la hucha hasta una fecha a cambio de una bonificación (RF-20)
@@ -832,8 +851,9 @@ paths:
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
   # ---------------------------------------------------------------- Reglas
-  /miembros/{miembroId}/paga:
+  /familias/{familiaId}/miembros/{miembroId}/paga:
     parameters:
+      - $ref: '#/components/parameters/FamiliaId'
       - $ref: '#/components/parameters/MiembroId'
     get:
       tags: [Reglas]
@@ -874,7 +894,9 @@ paths:
         '204': { description: Paga eliminada }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /reglas/interes:
+  /familias/{familiaId}/reglas/interes:
+    parameters:
+      - $ref: '#/components/parameters/FamiliaId'
     get:
       tags: [Reglas]
       operationId: obtenerInteres
@@ -910,7 +932,9 @@ paths:
               schema: { $ref: '#/components/schemas/ReglaInteres' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /reglas/inflacion:
+  /familias/{familiaId}/reglas/inflacion:
+    parameters:
+      - $ref: '#/components/parameters/FamiliaId'
     get:
       tags: [Reglas]
       operationId: obtenerInflacion
@@ -943,7 +967,7 @@ paths:
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
   # ---------------------------------------------------------------- Tareas
-  /plantillas/tareas:
+  /plantillas-tarea:
     get:
       tags: [Tareas]
       operationId: plantillasTareas
@@ -959,7 +983,9 @@ paths:
                 items: { $ref: '#/components/schemas/PlantillaTarea' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /tareas:
+  /familias/{familiaId}/tareas:
+    parameters:
+      - $ref: '#/components/parameters/FamiliaId'
     get:
       tags: [Tareas]
       operationId: listarTareas
@@ -997,8 +1023,9 @@ paths:
         '400': { $ref: '#/components/responses/Invalida' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /tareas/{tareaId}:
+  /familias/{familiaId}/tareas/{tareaId}:
     parameters:
+      - $ref: '#/components/parameters/FamiliaId'
       - name: tareaId
         in: path
         required: true
@@ -1029,7 +1056,9 @@ paths:
         '204': { description: Tarea archivada }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /asignaciones:
+  /familias/{familiaId}/asignaciones:
+    parameters:
+      - $ref: '#/components/parameters/FamiliaId'
     get:
       tags: [Tareas]
       operationId: listarAsignaciones
@@ -1059,16 +1088,17 @@ paths:
                 items: { $ref: '#/components/schemas/Asignacion' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /asignaciones/{asignacionId}/hecha:
+  /familias/{familiaId}/asignaciones/{asignacionId}/entregas:
     parameters:
+      - $ref: '#/components/parameters/FamiliaId'
       - $ref: '#/components/parameters/AsignacionId'
     post:
       tags: [Tareas]
       operationId: marcarHecha
-      summary: El hijo marca su tarea como hecha (RF-07)
+      summary: El hijo entrega su tarea como hecha (RF-07)
       x-roles: [HIJO]
       responses:
-        '200':
+        '201':
           description: Tarea en estado HECHA; se avisa a los adultos
           content:
             application/json:
@@ -1076,57 +1106,41 @@ paths:
         '409': { $ref: '#/components/responses/EstadoInvalido' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /asignaciones/{asignacionId}/aprobar:
+  /familias/{familiaId}/asignaciones/{asignacionId}/revisiones:
     parameters:
+      - $ref: '#/components/parameters/FamiliaId'
       - $ref: '#/components/parameters/AsignacionId'
     post:
       tags: [Tareas]
-      operationId: aprobarTarea
-      summary: Aprueba una tarea hecha e ingresa la recompensa (RF-08)
+      operationId: revisarTarea
+      summary: Un adulto aprueba o rechaza una tarea hecha (RF-08)
       description: |
-        En una sola transacción: crea el movimiento BANCO → monedero, pasa la asignación a
-        APROBADA y publica TAREA_APROBADA (experiencia, logros, notificación). Si dos adultos
-        aprueban a la vez, el segundo recibe 409.
+        Si `resultado` es `APROBADA`, en una sola transacción crea el movimiento BANCO →
+        monedero, pasa la asignación a APROBADA y publica TAREA_APROBADA (experiencia, logros,
+        notificación). Si es `RECHAZADA`, exige un comentario y la asignación vuelve a
+        PENDIENTE. Si dos adultos revisan a la vez, el segundo recibe 409.
       x-roles: [ADULTO_ADMIN, ADULTO]
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
-      responses:
-        '200':
-          description: Tarea aprobada
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Asignacion' }
-        '409': { $ref: '#/components/responses/EstadoInvalido' }
-        '401': { $ref: '#/components/responses/NoAutenticado' }
-
-  /asignaciones/{asignacionId}/rechazar:
-    parameters:
-      - $ref: '#/components/parameters/AsignacionId'
-    post:
-      tags: [Tareas]
-      operationId: rechazarTarea
-      summary: Rechaza una tarea hecha con un comentario; vuelve a PENDIENTE (RF-08)
-      x-roles: [ADULTO_ADMIN, ADULTO]
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              type: object
-              required: [comentario]
-              properties:
-                comentario: { type: string, minLength: 1, maxLength: 280 }
+            schema: { $ref: '#/components/schemas/RevisionPeticion' }
       responses:
-        '200':
-          description: Tarea devuelta a pendiente
+        '201':
+          description: Revisión registrada; devuelve la asignación en su nuevo estado
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Asignacion' }
+        '400': { $ref: '#/components/responses/Invalida' }
         '409': { $ref: '#/components/responses/EstadoInvalido' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
   # ---------------------------------------------------------------- Tienda
-  /categorias:
+  /familias/{familiaId}/categorias:
+    parameters:
+      - $ref: '#/components/parameters/FamiliaId'
     get:
       tags: [Tienda]
       operationId: listarCategorias
@@ -1142,7 +1156,7 @@ paths:
                 items: { $ref: '#/components/schemas/Categoria' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /plantillas/recompensas:
+  /plantillas-recompensa:
     get:
       tags: [Tienda]
       operationId: plantillasRecompensas
@@ -1158,7 +1172,9 @@ paths:
                 items: { $ref: '#/components/schemas/PlantillaRecompensa' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /recompensas:
+  /familias/{familiaId}/recompensas:
+    parameters:
+      - $ref: '#/components/parameters/FamiliaId'
     get:
       tags: [Tienda]
       operationId: listarRecompensas
@@ -1193,8 +1209,9 @@ paths:
         '400': { $ref: '#/components/responses/Invalida' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /recompensas/{recompensaId}:
+  /familias/{familiaId}/recompensas/{recompensaId}:
     parameters:
+      - $ref: '#/components/parameters/FamiliaId'
       - $ref: '#/components/parameters/RecompensaId'
     patch:
       tags: [Tienda]
@@ -1222,8 +1239,9 @@ paths:
         '204': { description: Recompensa archivada }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /recompensas/{recompensaId}/precios:
+  /familias/{familiaId}/recompensas/{recompensaId}/precios:
     parameters:
+      - $ref: '#/components/parameters/FamiliaId'
       - $ref: '#/components/parameters/RecompensaId'
     get:
       tags: [Tienda]
@@ -1240,9 +1258,9 @@ paths:
                 items: { $ref: '#/components/schemas/PrecioHistorico' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /recompensas/{recompensaId}/comprar:
+  /familias/{familiaId}/compras:
     parameters:
-      - $ref: '#/components/parameters/RecompensaId'
+      - $ref: '#/components/parameters/FamiliaId'
     post:
       tags: [Tienda]
       operationId: comprarRecompensa
@@ -1257,12 +1275,14 @@ paths:
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
               type: object
+              required: [recompensaId]
               properties:
+                recompensaId: { $ref: '#/components/schemas/Id' }
                 precioEsperado:
                   type: integer
                   format: int64
@@ -1282,8 +1302,6 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problema' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
-
-  /compras:
     get:
       tags: [Tienda]
       operationId: listarCompras
@@ -1306,10 +1324,11 @@ paths:
                 items: { $ref: '#/components/schemas/Compra' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /compras/{compraId}/entregar:
+  /familias/{familiaId}/compras/{compraId}/entrega:
     parameters:
+      - $ref: '#/components/parameters/FamiliaId'
       - $ref: '#/components/parameters/CompraId'
-    post:
+    put:
       tags: [Tienda]
       operationId: entregarCompra
       summary: El adulto confirma que ha entregado la recompensa (RF-15)
@@ -1323,10 +1342,11 @@ paths:
         '409': { $ref: '#/components/responses/EstadoInvalido' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /compras/{compraId}/cancelar:
+  /familias/{familiaId}/compras/{compraId}/cancelacion:
     parameters:
+      - $ref: '#/components/parameters/FamiliaId'
       - $ref: '#/components/parameters/CompraId'
-    post:
+    put:
       tags: [Tienda]
       operationId: cancelarCompra
       summary: Cancela una compra no entregada y devuelve las monedas
@@ -1340,7 +1360,9 @@ paths:
         '409': { $ref: '#/components/responses/EstadoInvalido' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /canjes:
+  /familias/{familiaId}/canjes:
+    parameters:
+      - $ref: '#/components/parameters/FamiliaId'
     post:
       tags: [Tienda]
       operationId: canjearEuros
@@ -1367,7 +1389,9 @@ paths:
         '409': { $ref: '#/components/responses/SaldoInsuficiente' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /pagos-pendientes:
+  /familias/{familiaId}/pagos-pendientes:
+    parameters:
+      - $ref: '#/components/parameters/FamiliaId'
     get:
       tags: [Tienda]
       operationId: listarPagosPendientes
@@ -1387,13 +1411,14 @@ paths:
                 items: { $ref: '#/components/schemas/PagoPendiente' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /pagos-pendientes/{pagoId}/pagado:
+  /familias/{familiaId}/pagos-pendientes/{pagoId}/pago:
     parameters:
+      - $ref: '#/components/parameters/FamiliaId'
       - name: pagoId
         in: path
         required: true
         schema: { $ref: '#/components/schemas/Id' }
-    post:
+    put:
       tags: [Tienda]
       operationId: marcarPagado
       summary: El adulto marca que ha dado el dinero en mano
@@ -1408,8 +1433,9 @@ paths:
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
   # ---------------------------------------------------------------- Presupuesto
-  /miembros/{miembroId}/presupuestos/{semana}:
+  /familias/{familiaId}/miembros/{miembroId}/presupuestos/{semana}:
     parameters:
+      - $ref: '#/components/parameters/FamiliaId'
       - $ref: '#/components/parameters/MiembroId'
       - name: semana
         in: path
@@ -1467,8 +1493,9 @@ paths:
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
   # ---------------------------------------------------------------- Estadísticas
-  /miembros/{miembroId}/estadisticas:
+  /familias/{familiaId}/miembros/{miembroId}/estadisticas:
     parameters:
+      - $ref: '#/components/parameters/FamiliaId'
       - $ref: '#/components/parameters/MiembroId'
     get:
       tags: [Estadísticas]
@@ -1511,9 +1538,10 @@ paths:
         '404': { $ref: '#/components/responses/NoEncontrado' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /cuestionarios/{codigo}/intentos:
+  /familias/{familiaId}/miembros/{miembroId}/intentos-cuestionario:
     parameters:
-      - $ref: '#/components/parameters/CodigoCuestionario'
+      - $ref: '#/components/parameters/FamiliaId'
+      - $ref: '#/components/parameters/MiembroId'
     post:
       tags: [Cuestionarios]
       operationId: responderCuestionario
@@ -1537,7 +1565,9 @@ paths:
               schema: { $ref: '#/components/schemas/Problema' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
 
-  /cuestionarios/resultados:
+  /familias/{familiaId}/resultados-cuestionarios:
+    parameters:
+      - $ref: '#/components/parameters/FamiliaId'
     get:
       tags: [Cuestionarios]
       operationId: resultadosCuestionarios
@@ -1561,6 +1591,12 @@ components:
       bearerFormat: JWT
 
   parameters:
+    FamiliaId:
+      name: familiaId
+      in: path
+      required: true
+      description: Debe ser la familia del token; si no, responde 404.
+      schema: { $ref: '#/components/schemas/Id' }
     MiembroId:
       name: miembroId
       in: path
@@ -1568,6 +1604,11 @@ components:
       schema: { $ref: '#/components/schemas/Id' }
     CuentaId:
       name: cuentaId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/Id' }
+    HuchaId:
+      name: huchaId
       in: path
       required: true
       schema: { $ref: '#/components/schemas/Id' }
@@ -1714,41 +1755,67 @@ components:
         email: { type: string, format: email }
         contrasena: { type: string, minLength: 8, maxLength: 72, writeOnly: true }
         aceptaPrivacidad: { type: boolean, const: true }
-    LoginPeticion:
+    SesionPeticion:
+      description: Cómo se obtiene la sesión, según `tipo`.
+      oneOf:
+        - $ref: '#/components/schemas/SesionConContrasena'
+        - $ref: '#/components/schemas/SesionConTokenRefresco'
+        - $ref: '#/components/schemas/SesionConCodigoVinculacion'
+        - $ref: '#/components/schemas/SesionConCodigoInvitacion'
+      discriminator:
+        propertyName: tipo
+        mapping:
+          CONTRASENA: '#/components/schemas/SesionConContrasena'
+          TOKEN_REFRESCO: '#/components/schemas/SesionConTokenRefresco'
+          CODIGO_VINCULACION: '#/components/schemas/SesionConCodigoVinculacion'
+          CODIGO_INVITACION: '#/components/schemas/SesionConCodigoInvitacion'
+    SesionConContrasena:
       type: object
-      required: [email, contrasena]
+      required: [tipo, email, contrasena]
       properties:
+        tipo: { type: string, const: CONTRASENA }
         email: { type: string, format: email }
         contrasena: { type: string, writeOnly: true }
         nombreDispositivo: { type: string, maxLength: 60 }
-    VincularPeticion:
+    SesionConTokenRefresco:
       type: object
-      required: [codigo, nombreDispositivo]
+      required: [tipo, tokenRefresco]
       properties:
+        tipo: { type: string, const: TOKEN_REFRESCO }
+        tokenRefresco: { type: string }
+        pin: { type: string, pattern: '^[0-9]{4,6}$', writeOnly: true }
+    SesionConCodigoVinculacion:
+      type: object
+      required: [tipo, codigo, nombreDispositivo]
+      properties:
+        tipo: { type: string, const: CODIGO_VINCULACION }
         codigo: { type: string, examples: [K7M2-9QXP] }
         nombreDispositivo: { type: string, maxLength: 60, examples: [Tablet de Lucía] }
-    UnirsePeticion:
+    SesionConCodigoInvitacion:
       type: object
-      required: [codigo, nombre, email, contrasena, aceptaPrivacidad]
+      required: [tipo, codigo, nombre, email, contrasena, aceptaPrivacidad]
       properties:
+        tipo: { type: string, const: CODIGO_INVITACION }
         codigo: { type: string }
         nombre: { type: string, maxLength: 40 }
         email: { type: string, format: email }
         contrasena: { type: string, minLength: 8, maxLength: 72, writeOnly: true }
         aceptaPrivacidad: { type: boolean, const: true }
-    RefrescarPeticion:
-      type: object
-      required: [tokenRefresco]
-      properties:
-        tokenRefresco: { type: string }
-        pin: { type: string, pattern: '^[0-9]{4,6}$', writeOnly: true }
+        nombreDispositivo: { type: string, maxLength: 60 }
     Sesion:
       type: object
-      required: [tokenAcceso, tokenRefresco, expiraEn, miembro]
+      required: [tokenAcceso, tokenRefresco, expiraEn, familiaId, miembro]
       properties:
         tokenAcceso: { type: string, description: JWT de 15 minutos }
         tokenRefresco: { type: string, description: Opaco; se rota en cada uso }
         expiraEn: { type: string, format: date-time }
+        familiaId: { $ref: '#/components/schemas/Id' }
+        miembro: { $ref: '#/components/schemas/Miembro' }
+    SesionActual:
+      type: object
+      required: [familiaId, miembro]
+      properties:
+        familiaId: { $ref: '#/components/schemas/Id' }
         miembro: { $ref: '#/components/schemas/Miembro' }
     CodigoAcceso:
       type: object
@@ -1756,7 +1823,7 @@ components:
       properties:
         codigo: { type: string, examples: [K7M2-9QXP] }
         expiraEn: { type: string, format: date-time }
-        contenidoQr: { type: string, description: Texto que la app pinta como QR, examples: ['tfgfamilia://vincular?codigo=K7M2-9QXP'] }
+        contenidoQr: { type: string, description: Texto que la app pinta como QR, examples: ['tfgfamilia://sesion?tipo=CODIGO_VINCULACION&codigo=K7M2-9QXP'] }
     Dispositivo:
       type: object
       properties:
@@ -2046,6 +2113,16 @@ components:
           properties:
             id: { $ref: '#/components/schemas/Id' }
             archivada: { type: boolean }
+    RevisionPeticion:
+      type: object
+      required: [resultado]
+      properties:
+        resultado: { type: string, enum: [APROBADA, RECHAZADA] }
+        comentario:
+          type: string
+          maxLength: 280
+          description: Obligatorio si se rechaza.
+
     Asignacion:
       type: object
       required: [id, tareaId, hijoId, fecha, estado]
@@ -2215,8 +2292,9 @@ components:
                 items: { type: string }
     IntentoPeticion:
       type: object
-      required: [momento, respuestas]
+      required: [cuestionario, momento, respuestas]
       properties:
+        cuestionario: { type: string, description: Código del cuestionario, examples: [CONOCIMIENTOS_HIJOS] }
         momento: { type: string, enum: [INICIAL, FINAL] }
         respuestas:
           type: array

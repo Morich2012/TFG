@@ -45,7 +45,7 @@ class ContratoApiTest extends PruebaIntegracion {
         }
     }
 
-    /** "POST /auth/registro" -> "registrarAdulto". */
+    /** "POST /familias" -> "registrarFamilia". */
     @SuppressWarnings("unchecked")
     private static Map<String, String> operaciones(Map<String, Object> openApi, String prefijo) {
         Map<String, String> resultado = new TreeMap<>();

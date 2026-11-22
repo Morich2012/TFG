@@ -1,6 +1,7 @@
 # PostgreSQL 16 para desarrollo local. Spring Boot lo arranca solo con
 # ./mvnw spring-boot:run (soporte de Docker Compose), o a mano con:
 #   docker compose up -d
+# Si el 5432 está ocupado por otro PostgreSQL: BD_PUERTO=5433
 services:
   postgres:
     image: postgres:16-alpine
@@ -9,7 +10,7 @@ services:
       POSTGRES_USER: tfg
       POSTGRES_PASSWORD: tfg
     ports:
-      - "5432:5432"
+      - "${BD_PUERTO:-5432}:5432"
     volumes:
       - tfg-datos:/var/lib/postgresql/data
 

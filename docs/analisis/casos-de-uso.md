@@ -130,7 +130,7 @@ Firebase Cloud Messaging.
 | Flujo principal | 1. El adulto introduce nombre de la familia, su nombre, correo y contraseña, y acepta la política de privacidad. 2. El sistema crea la familia, su cuenta BANCO y al adulto como administrador. 3. El sistema inicia la sesión y muestra un asistente con tres pasos: dar de alta a un hijo, crear la primera tarea y la primera recompensa. |
 | Alternativos | 1a. Correo ya registrado: se ofrece iniciar sesión. 1b. Contraseña de menos de 8 caracteres: se pide otra. |
 | Postcondición | Existe una familia con su administrador y su cuenta BANCO a 0 |
-| API | `POST /auth/registro` |
+| API | `POST /familias` |
 | Datos | `familia`, `miembro`, `cuenta`, `dispositivo` |
 
 ### CU-03 Dar de alta a un hijo y CU-04 Vincular su dispositivo
@@ -142,7 +142,7 @@ Firebase Cloud Messaging.
 | Flujo principal | 1. El adulto introduce el nombre o apodo del hijo, elige un avatar y, opcionalmente, su año de nacimiento y un PIN. 2. Marca la casilla de consentimiento. 3. El sistema crea el miembro y su monedero, y calcula su etapa. 4. El adulto pulsa «Vincular dispositivo» y el sistema muestra un QR válido 10 minutos. 5. En el dispositivo del hijo, la app escanea el QR. 6. El sistema comprueba el código, lo marca como usado y devuelve la sesión del hijo. 7. La app pide al hijo registrar su huella (o usar el PIN) y guarda el token cifrado con el Android Keystore. |
 | Alternativos | 1a. Sin año de nacimiento: la etapa es la 1 hasta que el adulto la fije. 6a. Código caducado o usado: la app pide generar otro. 7a. El dispositivo no tiene huella: se usa el PIN, que comprueba el servidor con límite de intentos. |
 | Postcondición | El hijo tiene monedero a 0 y un dispositivo vinculado. Del menor solo se guarda nombre, avatar y año (RNF-05) |
-| API | `POST /familia/miembros`, `POST /familia/miembros/{id}/codigo-vinculacion`, `POST /auth/vincular` |
+| API | `POST /familias/{familiaId}/miembros`, `POST /familias/{familiaId}/miembros/{miembroId}/codigos-vinculacion`, `POST /sesiones` |
 | Datos | `miembro`, `cuenta`, `codigo_acceso`, `dispositivo` |
 
 ### CU-08 Marcar una tarea como hecha y CU-09 Revisarla
@@ -156,7 +156,7 @@ Amplía el caso detallado 1 del análisis.
 | Flujo principal | 1. El hijo abre «Tareas» y ve las de hoy. 2. Marca una como hecha. 3. El sistema la pasa a HECHA y avisa a los adultos. 4. Un adulto abre su bandeja de tareas por revisar y la aprueba. 5. En una transacción, el sistema crea el movimiento BANCO → monedero con la recompensa y pasa la asignación a APROBADA. 6. El sistema publica «tarea aprobada»: suma una experiencia pequeña, comprueba logros («Primer sueldo») y avisa al hijo. |
 | Alternativos | 4a. El adulto la rechaza con un comentario: vuelve a PENDIENTE y el hijo ve el motivo. 4b. Dos adultos aprueban a la vez: el segundo recibe un aviso de que ya está aprobada (bloqueo optimista). 4c. La tarea periódica no se hace en su día: pasa a CADUCADA, sin penalización (decisión del análisis). |
 | Postcondición | El saldo del hijo aumenta en la recompensa y queda el movimiento enlazado a la asignación |
-| API | `GET /asignaciones`, `POST /asignaciones/{id}/hecha`, `POST /asignaciones/{id}/aprobar`, `POST /asignaciones/{id}/rechazar` |
+| API | `GET /familias/{familiaId}/asignaciones`, `POST /familias/{familiaId}/asignaciones/{asignacionId}/entregas`, `POST /familias/{familiaId}/asignaciones/{asignacionId}/revisiones` |
 | Datos | `tarea`, `tarea_hijo`, `asignacion_tarea`, `movimiento`, `evento_experiencia` |
 
 ### CU-13 Ingresar la paga
@@ -179,7 +179,7 @@ Amplía el caso detallado 1 del análisis.
 | Flujo principal | 1. El hijo abre la tienda y ve cada recompensa con su precio y, si tiene una hucha con meta, cuánto le alejaría de ella. 2. Elige una y confirma. 3. El sistema comprueba que el precio no ha cambiado y que quedan existencias. 4. En una transacción, crea el movimiento monedero → BANCO con la categoría de la recompensa, resta una existencia y crea la compra PEDIDA. 5. La app muestra el saldo restante y el mensaje de coste de oportunidad («con estas 20 monedas te habrían faltado 30 para la bici»). 6. El sistema avisa a los adultos y actualiza el presupuesto de la semana. |
 | Alternativos | 3a. Saldo insuficiente: se muestra cuánto falta y cuántas tareas o semanas de ahorro serían. 3b. Agotada. 3c. El precio ha subido por la inflación: se muestra el nuevo y se pide confirmar otra vez. 4a. Recompensa de DINERO_REAL: se crea además el pago pendiente en euros (CU-19). 6a. La compra supera el 80 % o el 100 % de una partida del presupuesto: aviso al hijo. |
 | Postcondición | El gasto queda registrado con su categoría y la compra pendiente de entregar |
-| API | `GET /recompensas`, `POST /recompensas/{id}/comprar` |
+| API | `GET /familias/{familiaId}/recompensas`, `POST /familias/{familiaId}/compras` |
 | Datos | `recompensa`, `compra`, `movimiento`, `pago_pendiente`, `partida_presupuesto` |
 
 ### CU-18 Canjear monedas por euros y CU-19 Saldar el pago
@@ -191,7 +191,7 @@ Amplía el caso detallado 1 del análisis.
 | Flujo principal | 1. El hijo indica cuántas monedas quiere canjear y la app muestra su valor en euros. 2. Confirma. 3. El sistema mueve las monedas del monedero al BANCO y crea el pago pendiente «Debes 5,00 € a Lucía». 4. Los adultos lo ven en su inicio. 5. Cuando le dan el dinero en mano, un adulto lo marca como pagado. |
 | Alternativos | 1a. La cantidad no da céntimos exactos: la app propone la cantidad válida más cercana. 3a. Saldo insuficiente. |
 | Postcondición | El canje queda en el libro y el adulto tiene registrado lo que debe hasta pagarlo. La app no mueve dinero real |
-| API | `POST /canjes`, `GET /pagos-pendientes`, `POST /pagos-pendientes/{id}/pagado` |
+| API | `POST /familias/{familiaId}/canjes`, `GET /familias/{familiaId}/pagos-pendientes`, `PUT /familias/{familiaId}/pagos-pendientes/{pagoId}/pago` |
 | Datos | `movimiento`, `pago_pendiente` |
 
 ### CU-20 Ahorrar en una hucha y CU-23 Liquidar intereses
@@ -205,7 +205,7 @@ Amplía el caso detallado 2 del análisis.
 | Flujo principal | 1. El hijo crea una hucha con nombre, meta y fecha opcional. 2. Aporta monedas desde el monedero. 3. Al cierre de cada periodo, el sistema calcula el interés de cada hucha: en simple sobre lo aportado, en compuesto sobre el saldo, redondeando hacia abajo, y lo ingresa como movimiento BANCO → hucha. 4. La app muestra la barra de progreso y, desde la etapa 3, la gráfica de interés simple frente a compuesto. 5. Al llegar a la meta, el sistema concede experiencia y el logro «Objetivo cumplido». |
 | Alternativos | 2a. Saldo insuficiente. 3a. El interés sale 0 por ser poco saldo: no se crea movimiento y la app explica por qué (concepto de saldo mínimo). 3b. La liquidación del periodo ya existe: no se repite. |
 | Postcondición | El historial de la hucha separa aportaciones e intereses |
-| API | `POST /huchas`, `POST /huchas/{id}/aportar`, `POST /huchas/{id}/retirar`, `PUT /reglas/interes` |
+| API | `POST /familias/{familiaId}/huchas`, `POST /familias/{familiaId}/huchas/{huchaId}/aportaciones`, `POST /familias/{familiaId}/huchas/{huchaId}/retiradas`, `PUT /familias/{familiaId}/reglas/interes` |
 | Datos | `cuenta`, `movimiento`, `regla_interes`, `liquidacion`, `logro_miembro` |
 
 ### CU-24 Definir el presupuesto semanal y CU-25 Cerrar la semana
@@ -217,7 +217,7 @@ Amplía el caso detallado 2 del análisis.
 | Flujo principal | 1. El hijo reparte lo que piensa gastar esta semana entre categorías. 2. Cada compra suma a su partida y la app muestra el porcentaje usado. 3. Al llegar al 80 % y al 100 % de una partida, la app avisa una sola vez. 4. El domingo a las 23:59 el sistema cierra la semana y marca si se cumplió. 5. Si se cumplió, concede experiencia y cuenta para «Cuentas claras» y «Planificador». |
 | Alternativos | 1a. La semana ya está cerrada: solo se puede definir la siguiente. 2a. Gasto en una categoría sin partida: cuenta como fuera de presupuesto. |
 | Postcondición | El presupuesto queda cerrado con su resultado |
-| API | `PUT /miembros/{id}/presupuestos/actual`, `GET /miembros/{id}/presupuestos/{semana}` |
+| API | `PUT /familias/{familiaId}/miembros/{miembroId}/presupuestos/{semana}`, `GET /familias/{familiaId}/miembros/{miembroId}/presupuestos/{semana}` |
 | Datos | `presupuesto`, `partida_presupuesto`, `liquidacion`, `evento_experiencia` |
 
 ### CU-26 Conceder experiencia, niveles, logros y desbloqueos

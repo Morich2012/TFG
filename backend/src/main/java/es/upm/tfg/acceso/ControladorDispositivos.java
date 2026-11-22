@@ -19,9 +19,9 @@ import es.upm.tfg.acceso.Respuestas.DispositivoDto;
 import es.upm.tfg.seguridad.UsuarioActual;
 import io.swagger.v3.oas.annotations.tags.Tag;
 
-/** Códigos de vinculación e invitación y gestión de dispositivos (etiqueta Familia, solo adultos). */
+/** Códigos de vinculación e invitación y dispositivos de cada miembro (etiqueta Familia, solo adultos). */
 @RestController
-@RequestMapping("/api/v1")
+@RequestMapping("/api/v1/familias/{familiaId}")
 @Tag(name = "Familia")
 @PreAuthorize("hasAnyRole('ADULTO_ADMIN', 'ADULTO')")
 public class ControladorDispositivos {
@@ -32,27 +32,30 @@ public class ControladorDispositivos {
         this.servicio = servicio;
     }
 
-    @PostMapping("/familia/miembros/{miembroId}/codigo-vinculacion")
+    @PostMapping("/miembros/{miembroId}/codigos-vinculacion")
     @ResponseStatus(HttpStatus.CREATED)
-    public CodigoAccesoDto generarCodigoVinculacion(@AuthenticationPrincipal Jwt jwt, @PathVariable long miembroId) {
-        return servicio.generarCodigoVinculacion(UsuarioActual.de(jwt), miembroId);
+    public CodigoAccesoDto generarCodigoVinculacion(@AuthenticationPrincipal Jwt jwt, @PathVariable long familiaId,
+            @PathVariable long miembroId) {
+        return servicio.generarCodigoVinculacion(UsuarioActual.de(jwt, familiaId), miembroId);
     }
 
-    @GetMapping("/familia/miembros/{miembroId}/dispositivos")
-    public List<DispositivoDto> listarDispositivos(@AuthenticationPrincipal Jwt jwt, @PathVariable long miembroId) {
-        return servicio.listarDispositivos(UsuarioActual.de(jwt), miembroId);
+    @GetMapping("/miembros/{miembroId}/dispositivos")
+    public List<DispositivoDto> listarDispositivos(@AuthenticationPrincipal Jwt jwt, @PathVariable long familiaId,
+            @PathVariable long miembroId) {
+        return servicio.listarDispositivos(UsuarioActual.de(jwt, familiaId), miembroId);
     }
 
-    @DeleteMapping("/dispositivos/{dispositivoId}")
+    @DeleteMapping("/miembros/{miembroId}/dispositivos/{dispositivoId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void revocarDispositivo(@AuthenticationPrincipal Jwt jwt, @PathVariable long dispositivoId) {
-        servicio.revocarDispositivo(UsuarioActual.de(jwt), dispositivoId);
+    public void revocarDispositivo(@AuthenticationPrincipal Jwt jwt, @PathVariable long familiaId,
+            @PathVariable long miembroId, @PathVariable long dispositivoId) {
+        servicio.revocarDispositivo(UsuarioActual.de(jwt, familiaId), miembroId, dispositivoId);
     }
 
-    @PostMapping("/familia/invitaciones")
+    @PostMapping("/invitaciones")
     @ResponseStatus(HttpStatus.CREATED)
     @PreAuthorize("hasRole('ADULTO_ADMIN')")
-    public CodigoAccesoDto invitarAdulto(@AuthenticationPrincipal Jwt jwt) {
-        return servicio.invitarAdulto(UsuarioActual.de(jwt));
+    public CodigoAccesoDto invitarAdulto(@AuthenticationPrincipal Jwt jwt, @PathVariable long familiaId) {
+        return servicio.invitarAdulto(UsuarioActual.de(jwt, familiaId));
     }
 }
