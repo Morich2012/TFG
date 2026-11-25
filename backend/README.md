@@ -64,7 +64,7 @@ prueban la API de punta a punta con MockMvc. GitHub Actions las pasa en cada pus
 | `AccesoTest` | Registro, login, rotación del token de refresco, cierre de sesión, vinculación con QR de un solo uso, invitación del segundo adulto, límite de intentos de PIN, permisos por rol |
 | `FamiliaTest` | Editar familia, alta de hijo (monedero, solo año de nacimiento, consentimiento), aislamiento entre familias (404), reglas de edición, baja con anonimización, revocar dispositivo |
 | `ServicioEtapasTest` | Etapa según edad y nivel, etapa fijada por los padres |
-| `LibroContableTest` | Reglas del dinero en la base de datos: saldos por disparador, sin saldo negativo, libro de solo inserción |
+| `LibroContableTest` | Reglas del dinero en la base de datos: saldos por disparador, sin saldo negativo, libro de solo inserción, saldo protegido, sentido de cada tipo, correcciones completas, titular de la misma familia, borrado de una familia entera |
 | `ContratoApiTest` | Cada operación implementada existe en `openapi.yaml` con la misma ruta, método y `operationId` |
 
 ## Dónde está cada cosa
@@ -84,7 +84,7 @@ backend/
     └── cuentas/                  apertura del banco y los monederos (movimientos en la iteración 2)
 ```
 
-Las migraciones crecen con las iteraciones: `V2__tareas.sql`, `V3__tienda.sql`... Una migración ya aplicada
+Las migraciones crecen con las iteraciones: `V2__correcciones_modelo.sql` aplica la revisión del modelo de datos a las tablas de V1, y después vendrán `V3__tareas.sql`, `V4__tienda.sql`... Una migración ya aplicada
 no se edita; los cambios van en una nueva.
 
 ## Diseño de las rutas
