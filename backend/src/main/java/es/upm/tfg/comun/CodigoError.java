@@ -14,7 +14,9 @@ public enum CodigoError {
     CORREO_EN_USO(HttpStatus.CONFLICT, "El correo ya está registrado"),
     CODIGO_CADUCADO(HttpStatus.GONE, "Código caducado o ya usado"),
     DEMASIADOS_INTENTOS(HttpStatus.TOO_MANY_REQUESTS, "Demasiados intentos"),
-    ESTADO_INVALIDO(HttpStatus.CONFLICT, "La operación no es válida en el estado actual");
+    SALDO_INSUFICIENTE(HttpStatus.CONFLICT, "Saldo insuficiente"),
+    ESTADO_INVALIDO(HttpStatus.CONFLICT, "La operación no es válida en el estado actual"),
+    YA_CORREGIDO(HttpStatus.CONFLICT, "El movimiento ya está corregido");
 
     private final HttpStatus estado;
     private final String titulo;

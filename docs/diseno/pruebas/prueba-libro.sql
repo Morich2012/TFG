@@ -149,13 +149,27 @@ DO $$ BEGIN
     RAISE EXCEPTION 'FALLO 14: asignación a un hijo de otra familia';
   EXCEPTION WHEN foreign_key_violation THEN NULL; END; END $$;
 
--- 15. Una familia entera se puede borrar (RGPD art. 17), con sus movimientos.
+-- 15. La marca de borrado de otra familia no deja borrar movimientos de esta.
+DO $$ BEGIN
+  BEGIN
+    PERFORM set_config('tfg.borrando_familia', '2', true);
+    DELETE FROM movimiento WHERE familia_id = 1;
+    RAISE EXCEPTION 'FALLO 15: se borraron movimientos con la marca de otra familia';
+  EXCEPTION WHEN integrity_constraint_violation THEN NULL; END;
+  PERFORM set_config('tfg.borrando_familia', '', true); END $$;
+
+-- 16. Una familia entera se puede borrar (RGPD art. 17), con sus movimientos y
+--     sus tareas revisadas.
+INSERT INTO asignacion_tarea (familia_id, tarea_id, hijo_id, fecha, recompensa, estado, hecha_en)
+     VALUES (1, 1, 2, current_date, 5, 'HECHA', now());
+INSERT INTO revision_tarea (asignacion_id, resultado, comentario, revisada_por)
+     VALUES (currval(pg_get_serial_sequence('asignacion_tarea', 'id')), 'RECHAZADA', 'Otra vez', 1);
 SELECT borrar_familia(1);
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM movimiento WHERE familia_id = 1) OR EXISTS (SELECT 1 FROM cuenta WHERE familia_id = 1) THEN
-    RAISE EXCEPTION 'FALLO 15: quedaron datos de la familia borrada'; END IF;
-  IF current_setting('tfg.borrando_familia', true) = 'si' THEN
-    RAISE EXCEPTION 'FALLO 15: la marca de borrado sigue activa'; END IF; END $$;
+    RAISE EXCEPTION 'FALLO 16: quedaron datos de la familia borrada'; END IF;
+  IF current_setting('tfg.borrando_familia', true) <> '' THEN
+    RAISE EXCEPTION 'FALLO 16: la marca de borrado sigue activa'; END IF; END $$;
 
 \echo 'TODAS LAS PRUEBAS DEL LIBRO PASAN'
 ROLLBACK;

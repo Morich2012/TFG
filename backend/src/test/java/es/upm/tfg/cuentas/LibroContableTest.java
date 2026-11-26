@@ -5,17 +5,22 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 import es.upm.tfg.PruebaIntegracion;
 
 /**
- * Reglas del dinero que garantiza la base de datos (V1 y V2), traídas de
+ * Reglas del dinero que garantiza la base de datos (V1 a V3), traídas de
  * docs/diseno/pruebas/prueba-libro.sql. Las cuentas se crean por la API para probar también que
  * el registro y el alta abren el banco y el monedero.
  */
 class LibroContableTest extends PruebaIntegracion {
+
+    @Autowired
+    PlatformTransactionManager transacciones;
 
     @Autowired
     JdbcClient jdbc;
@@ -131,5 +136,21 @@ class LibroContableTest extends PruebaIntegracion {
         Long quedan = jdbc.sql("SELECT count(*) FROM movimiento WHERE familia_id = ?").param(familia)
                 .query(Long.class).single();
         assertThat(quedan).isZero();
+    }
+
+    @Test
+    void laMarcaDeBorradoSoloPermiteBorrarLaFamiliaMarcada() throws Exception {
+        prepararFamiliaConHijo();
+        mover(banco, monedero, 10, "PAGA");
+        // Una conexión que pone la marca a mano con otro id no puede borrar estos movimientos.
+        TransactionTemplate tx = new TransactionTemplate(transacciones);
+        assertThatThrownBy(() -> tx.executeWithoutResult(estado -> {
+            jdbc.sql("SELECT set_config('tfg.borrando_familia', ?, true)").param(Long.toString(familia + 1000))
+                    .query().singleRow();
+            jdbc.sql("DELETE FROM movimiento WHERE familia_id = ?").param(familia).update();
+        })).isInstanceOf(DataAccessException.class);
+        Long quedan = jdbc.sql("SELECT count(*) FROM movimiento WHERE familia_id = ?").param(familia)
+                .query(Long.class).single();
+        assertThat(quedan).isEqualTo(1);
     }
 }

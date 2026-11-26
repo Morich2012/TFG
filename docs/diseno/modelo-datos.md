@@ -123,8 +123,10 @@ Es la pieza central y la que sustituye a la blockchain de la propuesta original.
   del monedero a una hucha del mismo titular, etc.
 - **Correcciones completas (V2).** Una `CORRECCION` anula el original entero: misma cantidad, cuentas
   al revés y una sola vez (`corrige_a_id` es único), como dice la API.
-- **Supresión de una familia (V2).** `borrar_familia(id)` es la única forma de borrar movimientos:
-  marca la transacción y el disparador de solo inserción la deja pasar (RGPD art. 17).
+- **Supresión de una familia (V2, V3).** `borrar_familia(id)` es la única forma de borrar movimientos:
+  marca la transacción con el id de la familia y el disparador de solo inserción deja borrar los de esa
+  familia y solo los de esa (RGPD art. 17). Las FK de autoría de las tablas nuevas (`creada_por`,
+  `revisada_por`...) son diferibles para que la cascada no falle con filas a dos niveles de `familia`.
 - **Sin mezclar familias (V2).** Las FK a un miembro, una tarea, una recompensa o una compra de la
   familia son compuestas, `(familia_id, x_id)`, así que la base de datos rechaza un hijo de otra
   familia aunque el código falle.

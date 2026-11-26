@@ -1034,12 +1034,15 @@ paths:
       tags: [Tareas]
       operationId: editarTarea
       summary: Edita una tarea; los cambios afectan a las asignaciones futuras
+      description: |
+        Solo cambian los campos que vienen. La periodicidad no se puede cambiar. Las asignaciones ya
+        creadas conservan su recompensa pactada; a un hijo que se quita se le borran las pendientes.
       x-roles: [ADULTO_ADMIN, ADULTO]
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/TareaPeticion' }
+            schema: { $ref: '#/components/schemas/TareaCambios' }
       responses:
         '200':
           description: Tarea actualizada
@@ -2113,6 +2116,24 @@ components:
           properties:
             id: { $ref: '#/components/schemas/Id' }
             archivada: { type: boolean }
+    TareaCambios:
+      type: object
+      description: Campos de TareaPeticion que se quieren cambiar; todos opcionales.
+      minProperties: 1
+      properties:
+        titulo: { type: string, maxLength: 80 }
+        descripcion: { type: string, maxLength: 500 }
+        recompensa: { $ref: '#/components/schemas/Monedas' }
+        diasSemana:
+          type: array
+          uniqueItems: true
+          items: { type: string, enum: [LUNES, MARTES, MIERCOLES, JUEVES, VIERNES, SABADO, DOMINGO] }
+        fechaLimite: { type: string, format: date }
+        hijos:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/Id' }
+        icono: { type: string }
     RevisionPeticion:
       type: object
       required: [resultado]

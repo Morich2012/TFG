@@ -32,9 +32,11 @@ import jakarta.validation.Valid;
 public class ControladorFamilia {
 
     private final ServicioFamilia servicio;
+    private final ServicioResumen resumen;
 
-    public ControladorFamilia(ServicioFamilia servicio) {
+    public ControladorFamilia(ServicioFamilia servicio, ServicioResumen resumen) {
         this.servicio = servicio;
+        this.resumen = resumen;
     }
 
     @GetMapping
@@ -82,5 +84,11 @@ public class ControladorFamilia {
     public void bajaMiembro(@AuthenticationPrincipal Jwt jwt, @PathVariable long familiaId,
             @PathVariable long miembroId) {
         servicio.baja(UsuarioActual.de(jwt, familiaId), miembroId);
+    }
+
+    @GetMapping("/resumen")
+    @PreAuthorize("hasAnyRole('ADULTO_ADMIN', 'ADULTO')")
+    public ResumenFamilia resumenFamilia(@AuthenticationPrincipal Jwt jwt, @PathVariable long familiaId) {
+        return resumen.resumen(UsuarioActual.de(jwt, familiaId));
     }
 }

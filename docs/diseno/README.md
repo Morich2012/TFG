@@ -44,7 +44,7 @@ npx @redocly/cli preview -d docs/diseno/api/openapi.yaml  # documentación naveg
 
 - `esquema.sql` se divide en migraciones de Flyway en `backend/src/main/resources/db/migration`
   (`V1__nucleo.sql` con familia, acceso, etapas y libro; `V2__correcciones_modelo.sql`; `V3__tareas.sql`; ...),
-  una por iteración, para que el esquema crezca con los módulos. `V1__nucleo.sql` ya está hecha.
+  una por iteración, para que el esquema crezca con los módulos. Ya están hechas V1, V2 y V3.
 - `openapi.yaml` es el contrato de partida (*contract-first*). El backend publica su propia versión con
   springdoc en Swagger UI, y `ContratoApiTest` comprueba que cada operación implementada está en este
   fichero con la misma ruta, método y `operationId`.
