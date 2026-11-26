@@ -24,6 +24,9 @@ public class Familia {
     /** Cuántas monedas equivalen a 1 euro (RF-35). */
     private Integer monedasPorEuro = 10;
 
+    /** Zona en la que se calcula "hoy" para las tareas y "esta semana" para el resumen. */
+    private String zonaHoraria = "Europe/Madrid";
+
     @Column(updatable = false)
     private Instant creadaEn = Instant.now();
 
@@ -60,6 +63,10 @@ public class Familia {
 
     public void setMonedasPorEuro(Integer monedasPorEuro) {
         this.monedasPorEuro = monedasPorEuro;
+    }
+
+    public String getZonaHoraria() {
+        return zonaHoraria;
     }
 
     public Instant getCreadaEn() {

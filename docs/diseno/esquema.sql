@@ -20,6 +20,10 @@
 --     impida mezclar familias.
 --   * Nombres: singular y snake_case. FK de pertenencia: <rol>_id (hijo_id,
 --     titular_id); FK de autoría: <acción>_por (creada_por, revisada_por).
+--   * Las FK de autoría de las tablas nuevas son DEFERRABLE INITIALLY DEFERRED:
+--     se comprueban al confirmar la transacción. Si no, borrar_familia falla
+--     cuando una fila a dos niveles de familia (revision_tarea) apunta a un
+--     miembro que la cascada ya ha borrado.
 --   * Valores cerrados: VARCHAR con CHECK (o un dominio si se repiten), que
 --     encaja con @Enumerated(STRING) y deja añadir valores con un ALTER.
 --   * VARCHAR(n) donde el límite es una regla del contrato de la API.
@@ -236,10 +240,12 @@ CREATE INDEX movimiento_categoria_idx ON movimiento(categoria_id);
 
 -- RNF-09: el libro solo admite inserciones. La única excepción es borrar una
 -- familia entera con borrar_familia() (derecho de supresión, RGPD art. 17),
--- que marca la transacción con tfg.borrando_familia.
+-- que marca la transacción con el id de esa familia en tfg.borrando_familia:
+-- solo se borran movimientos de la familia marcada, nunca los de otra.
 CREATE FUNCTION movimiento_inmutable() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-    IF TG_OP = 'DELETE' AND current_setting('tfg.borrando_familia', true) = 'si' THEN
+    IF TG_OP = 'DELETE'
+       AND current_setting('tfg.borrando_familia', true) = OLD.familia_id::text THEN
         RETURN OLD;
     END IF;
     RAISE EXCEPTION 'Los movimientos no se pueden modificar ni borrar; registra una corrección'
@@ -339,10 +345,11 @@ CREATE TRIGGER cuenta_saldo_protegido
     FOR EACH ROW EXECUTE FUNCTION cuenta_saldo_protegido();
 
 -- Supresión completa de una familia (RGPD art. 17). Es la única forma de borrar
--- movimientos: marca la transacción para que movimiento_inmutable lo permita.
+-- movimientos: marca la transacción con el id de la familia para que
+-- movimiento_inmutable permita borrar los suyos y solo los suyos.
 CREATE FUNCTION borrar_familia(p_familia_id BIGINT) RETURNS VOID LANGUAGE plpgsql AS $$
 BEGIN
-    PERFORM set_config('tfg.borrando_familia', 'si', true);   -- solo esta transacción
+    PERFORM set_config('tfg.borrando_familia', p_familia_id::text, true);   -- solo esta transacción
     DELETE FROM familia WHERE id = p_familia_id;
     PERFORM set_config('tfg.borrando_familia', '', true);
 END $$;
@@ -425,7 +432,7 @@ CREATE TABLE tarea (
     dias_semana             SMALLINT     CHECK (dias_semana BETWEEN 1 AND 127),
     fecha_limite            DATE,                    -- para UNICA
     icono                   VARCHAR(40)  NOT NULL DEFAULT 'tarea',
-    creada_por              BIGINT       NOT NULL REFERENCES miembro(id),
+    creada_por              BIGINT       NOT NULL REFERENCES miembro(id) DEFERRABLE INITIALLY DEFERRED,
     creada_en               TIMESTAMPTZ  NOT NULL DEFAULT now(),
     archivada_en            TIMESTAMPTZ,
     CONSTRAINT semanal_con_dias CHECK ((periodicidad = 'SEMANAL') = (dias_semana IS NOT NULL)),
@@ -472,7 +479,7 @@ CREATE TABLE revision_tarea (
     asignacion_id           BIGINT       NOT NULL REFERENCES asignacion_tarea(id) ON DELETE CASCADE,
     resultado               VARCHAR(10)  NOT NULL CHECK (resultado IN ('APROBADA', 'RECHAZADA')),
     comentario              VARCHAR(280),
-    revisada_por            BIGINT       NOT NULL REFERENCES miembro(id),
+    revisada_por            BIGINT       NOT NULL REFERENCES miembro(id) DEFERRABLE INITIALLY DEFERRED,
     revisada_en             TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 CREATE INDEX revision_tarea_asignacion_idx ON revision_tarea(asignacion_id, revisada_en);
@@ -502,7 +509,7 @@ CREATE TABLE recompensa (
     precio                  BIGINT       NOT NULL CHECK (precio > 0),  -- en monedas
     existencias             INTEGER      CHECK (existencias >= 0),    -- NULL = ilimitadas
     icono                   VARCHAR(40)  NOT NULL DEFAULT 'recompensa',
-    creada_por              BIGINT       NOT NULL REFERENCES miembro(id),
+    creada_por              BIGINT       NOT NULL REFERENCES miembro(id) DEFERRABLE INITIALLY DEFERRED,
     creada_en               TIMESTAMPTZ  NOT NULL DEFAULT now(),
     archivada_en            TIMESTAMPTZ,
     CONSTRAINT recompensa_familia_uq UNIQUE (familia_id, id)
@@ -530,7 +537,7 @@ CREATE TABLE compra (
     movimiento_id           BIGINT       NOT NULL UNIQUE REFERENCES movimiento(id),
     devolucion_id           BIGINT       UNIQUE REFERENCES movimiento(id),
     pedida_en               TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    resuelta_por            BIGINT       REFERENCES miembro(id),
+    resuelta_por            BIGINT       REFERENCES miembro(id) DEFERRABLE INITIALLY DEFERRED,
     resuelta_en             TIMESTAMPTZ,
     version                 INTEGER      NOT NULL DEFAULT 0,   -- bloqueo optimista
     CONSTRAINT cancelada_con_devolucion CHECK ((estado = 'CANCELADA') = (devolucion_id IS NOT NULL)),
@@ -554,7 +561,7 @@ CREATE TABLE pago_pendiente (
     movimiento_id           BIGINT       NOT NULL UNIQUE REFERENCES movimiento(id),
     estado                  VARCHAR(10)  NOT NULL DEFAULT 'PENDIENTE' CHECK (estado IN ('PENDIENTE', 'PAGADO')),
     creado_en               TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    pagado_por              BIGINT       REFERENCES miembro(id),
+    pagado_por              BIGINT       REFERENCES miembro(id) DEFERRABLE INITIALLY DEFERRED,
     pagado_en               TIMESTAMPTZ,
     version                 INTEGER      NOT NULL DEFAULT 0,   -- bloqueo optimista
     CONSTRAINT compra_enlazada CHECK ((origen = 'COMPRA') = (compra_id IS NOT NULL)),

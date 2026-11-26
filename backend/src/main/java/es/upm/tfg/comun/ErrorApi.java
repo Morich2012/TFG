@@ -29,4 +29,8 @@ public class ErrorApi extends RuntimeException {
     public static ErrorApi datosInvalidos(String detalle) {
         return new ErrorApi(CodigoError.DATOS_INVALIDOS, detalle);
     }
+
+    public static ErrorApi estadoInvalido(String detalle) {
+        return new ErrorApi(CodigoError.ESTADO_INVALIDO, detalle);
+    }
 }
