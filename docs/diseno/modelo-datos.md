@@ -25,6 +25,7 @@ erDiagram
     TAREA ||--o{ ASIGNACION_TAREA : "se repite en"
     MIEMBRO ||--o{ ASIGNACION_TAREA : hace
     ASIGNACION_TAREA |o--o| MOVIMIENTO : "se paga con"
+    ASIGNACION_TAREA ||--o{ REVISION_TAREA : "se revisa en"
 
     FAMILIA ||--o{ RECOMPENSA : ofrece
     CATEGORIA ||--o{ RECOMPENSA : clasifica
@@ -115,6 +116,18 @@ Es la pieza central y la que sustituye a la blockchain de la propuesta original.
   falla, y el libro sigue cuadrando.
 - **Idempotencia.** `clave_idempotencia` es única por familia. Si el móvil pierde la respuesta y
   repite la compra con la misma cabecera `Idempotency-Key`, no se cobra dos veces.
+- **Saldo protegido (V2).** Un disparador rechaza cualquier `UPDATE` del saldo que no venga del
+  disparador de movimientos, así que el saldo no se puede cambiar a mano ni desde otro código.
+- **Sentido de cada tipo (V2).** El disparador comprueba que cada tipo va entre los tipos de cuenta
+  que le tocan: `PAGA` y `RECOMPENSA_TAREA` salen del banco, `COMPRA` vuelve al banco, `AHORRO` va
+  del monedero a una hucha del mismo titular, etc.
+- **Correcciones completas (V2).** Una `CORRECCION` anula el original entero: misma cantidad, cuentas
+  al revés y una sola vez (`corrige_a_id` es único), como dice la API.
+- **Supresión de una familia (V2).** `borrar_familia(id)` es la única forma de borrar movimientos:
+  marca la transacción y el disparador de solo inserción la deja pasar (RGPD art. 17).
+- **Sin mezclar familias (V2).** Las FK a un miembro, una tarea, una recompensa o una compra de la
+  familia son compuestas, `(familia_id, x_id)`, así que la base de datos rechaza un hijo de otra
+  familia aunque el código falle.
 
 > **Decisión de diseño que conviene revisar.** El diseño del 25 de octubre decía que el servicio de
 > Java actualiza el saldo. Aquí lo hace la base de datos con disparadores, porque así las reglas del
@@ -132,7 +145,7 @@ Es la pieza central y la que sustituye a la blockchain de la propuesta original.
 | Etapas y mecánicas | `etapa`, `mecanica`, `mecanica_miembro` | Catálogo cargado por migración con las 20 mecánicas de las etapas 1 a 3; `implementada` indica cuáles entran en el MVP |
 | Libro contable | `cuenta`, `movimiento`, `categoria` | Ver apartado 2 |
 | Reglas automáticas | `regla_paga`, `regla_interes`, `regla_inflacion`, `liquidacion` | `liquidacion` tiene una clave única por tipo, referencia y periodo para que la paga o el interés no se paguen dos veces si el servidor se reinicia |
-| Tareas | `plantilla_tarea`, `tarea`, `tarea_hijo`, `asignacion_tarea` | Una asignación por hijo y día. Una asignación APROBADA siempre tiene su movimiento (restricción). Columna `version` para el bloqueo optimista |
+| Tareas | `plantilla_tarea`, `tarea`, `tarea_hijo`, `asignacion_tarea`, `revision_tarea` | Una asignación por hijo y día, con la recompensa pactada copiada. Una asignación APROBADA siempre tiene su movimiento (restricción). `revision_tarea` guarda cada revisión, también las rechazadas. Columna `version` para el bloqueo optimista |
 | Tienda | `plantilla_recompensa`, `recompensa`, `precio_recompensa`, `compra`, `pago_pendiente` | Los euros se guardan en céntimos. `precio_recompensa` guarda el historial para la inflación y las gráficas |
 | Presupuesto | `presupuesto`, `partida_presupuesto` | La semana se identifica por su lunes (restricción). Las marcas de aviso evitan repetir el del 80 % y el del 100 % |
 | Progreso | `evento_experiencia`, `logro`, `logro_miembro` | `evento_experiencia` también es de solo inserción y tiene clave única por origen: la misma tarea no da experiencia dos veces |

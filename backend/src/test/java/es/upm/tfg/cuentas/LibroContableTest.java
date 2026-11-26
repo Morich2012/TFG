@@ -11,7 +11,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import es.upm.tfg.PruebaIntegracion;
 
 /**
- * Reglas del dinero que garantiza la base de datos (V1), traídas de
+ * Reglas del dinero que garantiza la base de datos (V1 y V2), traídas de
  * docs/diseno/pruebas/prueba-libro.sql. Las cuentas se crean por la API para probar también que
  * el registro y el alta abren el banco y el monedero.
  */
@@ -74,5 +74,62 @@ class LibroContableTest extends PruebaIntegracion {
                 .param(monedero).update()).isInstanceOf(DataAccessException.class);
         assertThatThrownBy(() -> jdbc.sql("DELETE FROM movimiento WHERE cuenta_destino_id = ?")
                 .param(monedero).update()).isInstanceOf(DataAccessException.class);
+    }
+
+    @Test
+    void elSaldoSoloCambiaConUnMovimiento() throws Exception {
+        prepararFamiliaConHijo();
+        assertThatThrownBy(() -> jdbc.sql("UPDATE cuenta SET saldo = 9999 WHERE id = ?").param(monedero).update())
+                .isInstanceOf(DataAccessException.class);
+        jdbc.sql("UPDATE cuenta SET nombre = 'Mi monedero' WHERE id = ?").param(monedero).update();
+        assertThat(saldo(monedero)).isZero();
+    }
+
+    @Test
+    void cadaTipoDeMovimientoVaEnSuSentido() throws Exception {
+        prepararFamiliaConHijo();
+        mover(banco, monedero, 10, "PAGA");
+        assertThatThrownBy(() -> mover(monedero, banco, 5, "PAGA")).isInstanceOf(DataAccessException.class);
+        assertThatThrownBy(() -> mover(banco, monedero, 5, "COMPRA")).isInstanceOf(DataAccessException.class);
+        assertThat(saldo(monedero)).isEqualTo(10);
+    }
+
+    @Test
+    void unaCorreccionAnulaElOriginalEnteroYUnaSolaVez() throws Exception {
+        prepararFamiliaConHijo();
+        mover(banco, monedero, 10, "RECOMPENSA_TAREA");
+        long original = jdbc.sql("SELECT id FROM movimiento WHERE cuenta_destino_id = ?").param(monedero)
+                .query(Long.class).single();
+        String corregir = """
+                INSERT INTO movimiento (familia_id, cuenta_origen_id, cuenta_destino_id, cantidad, tipo, concepto, corrige_a_id)
+                VALUES (?, ?, ?, ?, 'CORRECCION', 'corrección', ?)""";
+        assertThatThrownBy(() -> jdbc.sql(corregir).params(familia, monedero, banco, 4, original).update())
+                .isInstanceOf(DataAccessException.class);
+        jdbc.sql(corregir).params(familia, monedero, banco, 10, original).update();
+        assertThatThrownBy(() -> jdbc.sql(corregir).params(familia, monedero, banco, 10, original).update())
+                .isInstanceOf(DataAccessException.class);
+        assertThat(saldo(monedero)).isZero();
+    }
+
+    @Test
+    void unaCuentaNoPuedeTenerUnTitularDeOtraFamilia() throws Exception {
+        prepararFamiliaConHijo();
+        Sesion otra = registrarFamilia();
+        long hijoAjeno = altaHijo(otra, "Pablo", 2016, null);
+        assertThatThrownBy(() -> jdbc.sql(
+                "INSERT INTO cuenta (familia_id, tipo, titular_id, nombre) VALUES (?, 'HUCHA', ?, 'Ajena')")
+                .params(familia, hijoAjeno).update()).isInstanceOf(DataAccessException.class);
+    }
+
+    @Test
+    void unaFamiliaConMovimientosSePuedeBorrarEntera() throws Exception {
+        prepararFamiliaConHijo();
+        mover(banco, monedero, 10, "PAGA");
+        assertThatThrownBy(() -> jdbc.sql("DELETE FROM familia WHERE id = ?").param(familia).update())
+                .isInstanceOf(DataAccessException.class);
+        jdbc.sql("SELECT borrar_familia(?)").param(familia).query().singleRow();
+        Long quedan = jdbc.sql("SELECT count(*) FROM movimiento WHERE familia_id = ?").param(familia)
+                .query(Long.class).single();
+        assertThat(quedan).isZero();
     }
 }
